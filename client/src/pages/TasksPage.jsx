@@ -1,8 +1,12 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTasks, useCreateTask, useUpdateTask, useUpdateTaskStatus, useDeleteTask } from '../hooks/useTasks';
 import TaskForm from '../components/TaskForm';
 import TaskItem from '../components/TaskItem';
+import KanbanBoard from '../components/KanbanBoard';
+import TaskFilters from '../components/TaskFilters';
 import { useToast } from '../components/Toast';
+import { taskApi } from '../services/api';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -12,19 +16,33 @@ const FILTERS = [
 ];
 
 function TasksPage() {
+  const [view, setView] = useState(() => localStorage.getItem('tasksView') || 'list');
   const [statusFilter, setStatusFilter] = useState('');
+  const [filters, setFilters] = useState({ search: '', priority: '', type: '' });
   const [showForm, setShowForm] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
+  const isBoard = view === 'board';
 
   const queryParams = { parentOnly: 'true' };
-  if (statusFilter) queryParams.status = statusFilter;
+  if (!isBoard && statusFilter) queryParams.status = statusFilter;
+  if (isBoard) queryParams.limit = '200';
+  if (filters.search) queryParams.search = filters.search;
+  if (filters.priority) queryParams.priority = filters.priority;
+  if (filters.type) queryParams.type = filters.type;
 
   const { data, isLoading, error } = useTasks(queryParams);
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const updateStatus = useUpdateTaskStatus();
   const deleteTask = useDeleteTask();
+
+  const toggleView = (v) => {
+    setView(v);
+    localStorage.setItem('tasksView', v);
+  };
 
   const handleCreate = (taskData) => {
     createTask.mutate(taskData, {
@@ -53,19 +71,72 @@ function TasksPage() {
     }
   };
 
+  const handleBoardStatusChange = async (taskId, newStatus) => {
+    // Optimistic update: move the task in cache immediately
+    const prevData = queryClient.getQueryData(['tasks', queryParams]);
+
+    queryClient.setQueryData(['tasks', queryParams], (old) => {
+      if (!old?.tasks) return old;
+      return {
+        ...old,
+        tasks: old.tasks.map(t =>
+          t._id === taskId ? { ...t, status: newStatus } : t
+        ),
+      };
+    });
+
+    try {
+      await taskApi.updateStatus(taskId, newStatus);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (err) {
+      // Revert on error
+      queryClient.setQueryData(['tasks', queryParams], prevData);
+      addToast(err.message || 'Failed to update task status', 'error');
+    }
+  };
+
+  // Filter out archived tasks for board view
+  const boardTasks = data?.tasks?.filter(t => t.status !== 'archived') || [];
+
   return (
-    <div className="max-w-3xl mx-auto w-full">
+    <div className={isBoard ? 'max-w-6xl mx-auto w-full' : 'max-w-3xl mx-auto w-full'}>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Tasks</h2>
-        <button
-          onClick={() => {
-            setShowForm(!showForm);
-            setSelectedTask(null);
-          }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-        >
-          {showForm ? 'Cancel' : '+ New Task'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View Toggle */}
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <button
+              onClick={() => toggleView('list')}
+              className={`px-3 py-1.5 text-sm transition ${
+                !isBoard
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              List
+            </button>
+            <button
+              onClick={() => toggleView('board')}
+              className={`px-3 py-1.5 text-sm transition ${
+                isBoard
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+            >
+              Board
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setShowForm(!showForm);
+              setSelectedTask(null);
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          >
+            {showForm ? 'Cancel' : '+ New Task'}
+          </button>
+        </div>
       </div>
 
       {showForm && !selectedTask && (
@@ -87,21 +158,26 @@ function TasksPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        {FILTERS.map(f => (
-          <button
-            key={f.value}
-            onClick={() => setStatusFilter(f.value)}
-            className={`px-3 py-1 rounded-full text-sm transition ${
-              statusFilter === f.value
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <TaskFilters filters={filters} onChange={setFilters} />
+
+      {/* List mode: status filters */}
+      {!isBoard && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setStatusFilter(f.value)}
+              className={`px-3 py-1 rounded-full text-sm transition ${
+                statusFilter === f.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {isLoading && <p className="text-gray-500 dark:text-gray-400">Loading tasks...</p>}
       {error && <p className="text-red-500">Error: {error.message}</p>}
@@ -121,22 +197,37 @@ function TasksPage() {
         </div>
       )}
 
-      <div className="space-y-2">
-        {data?.tasks?.map(task => (
-          <TaskItem
-            key={task._id}
-            task={task}
-            onStatusChange={handleStatusChange}
-            onDelete={handleDelete}
-            onClick={(task) => {
-              setSelectedTask(task);
-              setShowForm(false);
-            }}
-          />
-        ))}
-      </div>
+      {/* Board view */}
+      {isBoard && !isLoading && boardTasks.length > 0 && (
+        <KanbanBoard
+          tasks={boardTasks}
+          onStatusChange={handleBoardStatusChange}
+          onTaskClick={(task) => {
+            setSelectedTask(task);
+            setShowForm(false);
+          }}
+        />
+      )}
 
-      {data?.pagination?.pages > 1 && (
+      {/* List view */}
+      {!isBoard && (
+        <div className="space-y-2">
+          {data?.tasks?.map(task => (
+            <TaskItem
+              key={task._id}
+              task={task}
+              onStatusChange={handleStatusChange}
+              onDelete={handleDelete}
+              onClick={(task) => {
+                setSelectedTask(task);
+                setShowForm(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {!isBoard && data?.pagination?.pages > 1 && (
         <div className="mt-4 text-center text-sm text-gray-500 dark:text-gray-400">
           Page {data.pagination.page} of {data.pagination.pages} ({data.pagination.total} tasks)
         </div>

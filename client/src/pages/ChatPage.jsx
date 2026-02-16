@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { aiApi } from '../services/api';
 
@@ -8,8 +9,41 @@ const QUICK_ACTIONS = [
   { label: 'Help me prioritize', message: 'Help me prioritize my tasks for today.' },
 ];
 
+const ACTION_STYLES = {
+  create_task: { bg: 'bg-green-50 dark:bg-green-900/20', border: 'border-green-200 dark:border-green-800', icon: '+', label: 'Created' },
+  complete_task: { bg: 'bg-green-50 dark:bg-green-900/20', border: 'border-green-200 dark:border-green-800', icon: '✓', label: 'Completed' },
+  update_task: { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800', icon: '✎', label: 'Updated' },
+  start_task: { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800', icon: '▶', label: 'Started' },
+  delete_task: { bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-red-200 dark:border-red-800', icon: '✕', label: 'Archived' },
+};
+
+function ActionCard({ action }) {
+  const style = ACTION_STYLES[action.type] || ACTION_STYLES.update_task;
+
+  if (!action.success) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-sm">
+        <span className="text-red-500 font-bold">!</span>
+        <span className="text-red-700 dark:text-red-300">
+          Failed to {action.type.replace('_', ' ')}: {action.error}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${style.bg} ${style.border} text-sm`}>
+      <span className="font-bold text-base leading-none">{style.icon}</span>
+      <span className="text-gray-700 dark:text-gray-300">
+        {style.label}: <strong>{action.task?.title || 'Task'}</strong>
+      </span>
+    </div>
+  );
+}
+
 function ChatPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,6 +53,25 @@ function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleResult = (result, userContent) => {
+    setConversationId(result.conversationId);
+    const assistantMsg = { role: 'assistant', content: result.message };
+    if (result.actions?.length) {
+      assistantMsg.actions = result.actions;
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    }
+
+    if (userContent) {
+      setMessages(prev => [
+        ...prev.filter(m => m !== prev[prev.length - 1] || m.role !== 'user'),
+        { role: 'user', content: userContent },
+        assistantMsg,
+      ]);
+    } else {
+      setMessages(prev => [...prev, assistantMsg]);
+    }
+  };
 
   const sendMessage = async (e) => {
     e?.preventDefault?.();
@@ -32,7 +85,12 @@ function ChatPage() {
     try {
       const result = await aiApi.chat(text, conversationId);
       setConversationId(result.conversationId);
-      setMessages(prev => [...prev, { role: 'assistant', content: result.message }]);
+      const assistantMsg = { role: 'assistant', content: result.message };
+      if (result.actions?.length) {
+        assistantMsg.actions = result.actions;
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      }
+      setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }]);
     } finally {
@@ -49,9 +107,14 @@ function ChatPage() {
       const result = await aiApi.morningCheckIn();
       if (result.conversationId) {
         setConversationId(result.conversationId);
+        const assistantMsg = { role: 'assistant', content: result.message };
+        if (result.actions?.length) {
+          assistantMsg.actions = result.actions;
+          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        }
         setMessages([
           { role: 'user', content: 'Good morning! What does my day look like?' },
-          { role: 'assistant', content: result.message },
+          assistantMsg,
         ]);
       } else {
         setMessages([{ role: 'assistant', content: result.message }]);
@@ -71,9 +134,14 @@ function ChatPage() {
     try {
       const result = await aiApi.planDay();
       setConversationId(result.conversationId);
+      const assistantMsg = { role: 'assistant', content: result.message };
+      if (result.actions?.length) {
+        assistantMsg.actions = result.actions;
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      }
       setMessages([
         { role: 'user', content: 'Please help me plan my day.' },
-        { role: 'assistant', content: result.message },
+        assistantMsg,
       ]);
     } catch (err) {
       setMessages([{ role: 'assistant', content: `Error: ${err.message}` }]);
@@ -140,19 +208,27 @@ function ChatPage() {
         )}
 
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[85%] sm:max-w-[80%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-br-md'
-                  : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-md'
-              }`}
-            >
-              {msg.content}
+          <div key={i}>
+            <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div
+                className={`max-w-[85%] sm:max-w-[80%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
+                  msg.role === 'user'
+                    ? 'bg-blue-600 text-white rounded-br-md'
+                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-md'
+                }`}
+              >
+                {msg.content}
+              </div>
             </div>
+            {msg.actions?.length > 0 && (
+              <div className="flex justify-start mt-2">
+                <div className="max-w-[85%] sm:max-w-[80%] space-y-1.5">
+                  {msg.actions.map((action, j) => (
+                    <ActionCard key={j} action={action} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ))}
 

@@ -3,6 +3,7 @@ const Task = require('../models/Task');
 const Conversation = require('../models/Conversation');
 const UserPattern = require('../models/UserPattern');
 const calendarService = require('./calendar');
+const { updateParentStatus } = require('./taskHelpers');
 const logger = require('../config/logger');
 
 const CLAUDE_PATH = '/Users/teletran-1/.local/bin/claude';
@@ -105,7 +106,7 @@ function formatTasks(tasks) {
   if (!tasks.length) return 'No pending tasks.';
 
   return tasks.map((t, i) => {
-    const parts = [`${i + 1}. "${t.title}" [${t.priority}]`];
+    const parts = [`${i + 1}. [ID:${t._id}] "${t.title}" [${t.priority}]`];
     if (t.dueDate) parts.push(`Due: ${new Date(t.dueDate).toLocaleDateString()}`);
     if (t.estimatedDuration) parts.push(`Est: ${t.estimatedDuration}min`);
     if (t.type !== 'other') parts.push(`Type: ${t.type}`);
@@ -165,7 +166,24 @@ ${formatCalendar(context.calendarEvents)}
 USER PATTERNS:
 ${formatPatterns(context.patterns)}
 
-${context.recentSummary ? `RECENT CONVERSATION CONTEXT:\n${context.recentSummary}` : ''}`;
+${context.recentSummary ? `RECENT CONVERSATION CONTEXT:\n${context.recentSummary}` : ''}
+
+AVAILABLE ACTIONS:
+You can perform task actions by including action blocks in your response. Use this format exactly:
+[ACTION: {"type": "create_task", "params": {"title": "...", "priority": "medium", "dueDate": "YYYY-MM-DD", "type": "other"}}]
+[ACTION: {"type": "update_task", "params": {"taskId": "...", "fields": {"title": "...", "priority": "...", "dueDate": "..."}}}]
+[ACTION: {"type": "complete_task", "params": {"taskId": "..."}}]
+[ACTION: {"type": "delete_task", "params": {"taskId": "..."}}]
+[ACTION: {"type": "start_task", "params": {"taskId": "..."}}]
+
+RULES FOR ACTIONS:
+- Only perform actions when the user explicitly asks you to create, update, complete, delete, or start a task.
+- Always confirm what you're doing in your text response.
+- Use task IDs from the PENDING TASKS list above.
+- If the user's request is ambiguous, ask for clarification instead of guessing.
+- You may include multiple actions in one response.
+- For create_task: "priority" defaults to "medium", "type" defaults to "other". Only "title" is required.
+- For update_task: only include fields that should change.`;
 
   if (type === 'morning_checkin') {
     return `${base}
@@ -220,6 +238,134 @@ function buildFullPrompt(systemPrompt, messageHistory) {
   return prompt;
 }
 
+/**
+ * Parse [ACTION: {...}] blocks from Claude's response.
+ * Returns { cleanMessage, actions }.
+ */
+function parseActions(responseText) {
+  const actionRegex = /\[ACTION:\s*(\{[\s\S]*?\})\s*\]/g;
+  const actions = [];
+  let match;
+
+  while ((match = actionRegex.exec(responseText)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      actions.push(parsed);
+    } catch (err) {
+      logger.warn('Failed to parse action block:', match[1], err.message);
+    }
+  }
+
+  const cleanMessage = responseText.replace(actionRegex, '').replace(/\n{3,}/g, '\n\n').trim();
+
+  return { cleanMessage, actions };
+}
+
+/**
+ * Execute a single action on behalf of a user.
+ * Returns { success, type, task?, error? }.
+ */
+async function executeAction(action, user) {
+  const { type, params } = action;
+  const userId = user._id;
+
+  try {
+    switch (type) {
+      case 'create_task': {
+        const taskData = {
+          title: params.title,
+          userId,
+          priority: params.priority || 'medium',
+          type: params.type || 'other',
+        };
+        if (params.dueDate) taskData.dueDate = new Date(params.dueDate);
+        if (params.description) taskData.description = params.description;
+        if (params.estimatedDuration) taskData.estimatedDuration = params.estimatedDuration;
+
+        const task = await Task.create(taskData);
+        return { success: true, type: 'create_task', task };
+      }
+
+      case 'update_task': {
+        const fields = { ...params.fields };
+        delete fields.userId;
+        delete fields._id;
+        if (fields.dueDate) fields.dueDate = new Date(fields.dueDate);
+
+        const task = await Task.findOneAndUpdate(
+          { _id: params.taskId, userId },
+          fields,
+          { new: true, runValidators: true }
+        );
+        if (!task) return { success: false, type: 'update_task', error: 'Task not found' };
+        return { success: true, type: 'update_task', task };
+      }
+
+      case 'complete_task': {
+        const task = await Task.findOne({ _id: params.taskId, userId })
+          .populate('dependencies', 'status title');
+        if (!task) return { success: false, type: 'complete_task', error: 'Task not found' };
+
+        if (task.dependencies.length > 0) {
+          const incomplete = task.dependencies.filter(d => d.status !== 'completed');
+          if (incomplete.length > 0) {
+            return {
+              success: false,
+              type: 'complete_task',
+              error: `Cannot complete: dependencies not finished (${incomplete.map(d => d.title).join(', ')})`,
+            };
+          }
+        }
+
+        task.status = 'completed';
+        task.completedAt = new Date();
+        task.completedDuringHour = new Date().getHours();
+        await task.save();
+
+        if (task.parentTaskId) {
+          await updateParentStatus(task.parentTaskId, userId);
+        }
+
+        return { success: true, type: 'complete_task', task };
+      }
+
+      case 'delete_task': {
+        const task = await Task.findOne({ _id: params.taskId, userId });
+        if (!task) return { success: false, type: 'delete_task', error: 'Task not found' };
+
+        await Task.updateMany(
+          { _id: { $in: [task._id, ...task.subtasks] }, userId },
+          { status: 'archived' }
+        );
+
+        if (task.parentTaskId) {
+          await Task.findByIdAndUpdate(task.parentTaskId, {
+            $pull: { subtasks: task._id },
+          });
+        }
+
+        return { success: true, type: 'delete_task', task };
+      }
+
+      case 'start_task': {
+        const task = await Task.findOneAndUpdate(
+          { _id: params.taskId, userId },
+          { status: 'in_progress' },
+          { new: true }
+        );
+        if (!task) return { success: false, type: 'start_task', error: 'Task not found' };
+        return { success: true, type: 'start_task', task };
+      }
+
+      default:
+        return { success: false, type, error: `Unknown action type: ${type}` };
+    }
+  } catch (err) {
+    logger.error(`Action execution failed (${type}):`, err.message);
+    return { success: false, type, error: err.message };
+  }
+}
+
 async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   let conversation;
   if (conversationId) {
@@ -246,15 +392,26 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   }));
 
   const fullPrompt = buildFullPrompt(systemPrompt, messageHistory);
-  const assistantMessage = await callClaude(fullPrompt);
+  const rawResponse = await callClaude(fullPrompt);
 
-  conversation.messages.push({ role: 'assistant', content: assistantMessage });
+  const { cleanMessage, actions } = parseActions(rawResponse);
+
+  // Execute any actions Claude included
+  const actionResults = [];
+  for (const action of actions) {
+    const result = await executeAction(action, user);
+    actionResults.push(result);
+  }
+
+  // Save the clean message (without action blocks) to conversation
+  conversation.messages.push({ role: 'assistant', content: cleanMessage });
   await conversation.save();
 
   return {
     conversationId: conversation._id,
-    message: assistantMessage,
+    message: cleanMessage,
     type: conversation.type,
+    actions: actionResults.length > 0 ? actionResults : undefined,
   };
 }
 
@@ -339,4 +496,6 @@ module.exports = {
   estimateDuration,
   planDay,
   buildUserContext,
+  parseActions,
+  executeAction,
 };
