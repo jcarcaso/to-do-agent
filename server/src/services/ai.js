@@ -16,7 +16,7 @@ function callClaude(fullPrompt) {
     const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}`);
 
-    const proc = spawn(CLAUDE_PATH, ['-p'], {
+    const proc = spawn(CLAUDE_PATH, ['-p', '--model','haiku'], {
       env: (() => {
         const env = {
           ...process.env,

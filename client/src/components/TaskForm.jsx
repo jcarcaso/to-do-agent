@@ -29,6 +29,8 @@ function TaskForm({ onSubmit, initialData, onCancel }) {
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
 
+  const inputClass = 'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500';
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
@@ -38,7 +40,7 @@ function TaskForm({ onSubmit, initialData, onCancel }) {
           value={form.title}
           onChange={update('title')}
           required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={inputClass}
         />
       </div>
 
@@ -48,44 +50,44 @@ function TaskForm({ onSubmit, initialData, onCancel }) {
           value={form.description}
           onChange={update('description')}
           rows={3}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={inputClass}
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm text-gray-600 mb-1">Priority</label>
-          <select value={form.priority} onChange={update('priority')} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Priority</label>
+          <select value={form.priority} onChange={update('priority')} className={inputClass}>
             {PRIORITIES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-sm text-gray-600 mb-1">Type</label>
-          <select value={form.type} onChange={update('type')} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Type</label>
+          <select value={form.type} onChange={update('type')} className={inputClass}>
             {TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
           </select>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm text-gray-600 mb-1">Due date</label>
-          <input type="date" value={form.dueDate} onChange={update('dueDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Due date</label>
+          <input type="date" value={form.dueDate} onChange={update('dueDate')} className={inputClass} />
         </div>
         <div>
-          <label className="block text-sm text-gray-600 mb-1">Est. duration (min)</label>
-          <input type="number" value={form.estimatedDuration} onChange={update('estimatedDuration')} min="1" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Est. duration (min)</label>
+          <input type="number" value={form.estimatedDuration} onChange={update('estimatedDuration')} min="1" className={inputClass} />
         </div>
       </div>
 
       <div>
-        <label className="block text-sm text-gray-600 mb-1">Tags (comma separated)</label>
-        <input type="text" value={form.tags} onChange={update('tags')} placeholder="e.g. urgent, frontend" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+        <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Tags (comma separated)</label>
+        <input type="text" value={form.tags} onChange={update('tags')} placeholder="e.g. urgent, frontend" className={inputClass} />
       </div>
 
       <div className="flex gap-2 justify-end">
         {onCancel && (
-          <button type="button" onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition">
+          <button type="button" onClick={onCancel} className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
             Cancel
           </button>
         )}

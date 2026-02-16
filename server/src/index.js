@@ -40,7 +40,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/calendar', require('./routes/calendar'));
 app.use('/api/ai', require('./routes/ai'));
-// app.use('/api/user', require('./routes/user'));
+app.use('/api/user', require('./routes/user'));
 
 // Socket.io connection with user tracking for notifications
 const { setIo, registerUserSocket, unregisterUserSocket } = require('./jobs/morningCheckIn');

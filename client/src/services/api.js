@@ -54,3 +54,8 @@ export const authApi = {
   me: () => request('/auth/me'),
   logout: () => request('/auth/logout', { method: 'POST' }),
 };
+
+export const userApi = {
+  getPreferences: () => request('/user/preferences'),
+  updatePreferences: (data) => request('/user/preferences', { method: 'PUT', body: JSON.stringify(data) }),
+};
