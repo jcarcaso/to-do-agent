@@ -1344,16 +1344,30 @@ tail -f /var/log/backup.log
 - Email (SendGrid) and SMS (Twilio) channels
 - Socket.io real-time chat streaming (currently uses request/response)
 
-### Phase 4: Progressive Web App & Polish — NOT STARTED
+### Phase 4: Progressive Web App & Polish — COMPLETE
 
-Next phase to implement. Includes:
-- PWA manifest + service worker (offline support)
-- Mobile-responsive design
-- User settings page
-- Notifications
-- Performance optimization
+**What was built:**
+- Mobile-responsive design — bottom nav for mobile, responsive grids, touch-friendly targets, safe-area handling
+- Navigation fix — replaced `<a href>` with React Router `<NavLink>` (no more full page reloads)
+- User settings page (`/settings`) — morning check-in time, timezone, notifications, phone number, theme selector
+- User preferences API (`server/src/routes/user.js`) — GET/PUT `/api/user/preferences`
+- Dark mode — `ThemeContext`, Tailwind `darkMode: 'class'`, `dark:` variants on all components, persisted to localStorage + server
+- PWA — `manifest.json`, `favicon.svg`, `vite-plugin-pwa` with NetworkFirst caching for API routes, service worker auto-update
+- Offline support — `OfflineIndicator` banner, React Query `networkMode: 'offlineFirst'`
+- Error boundary — catches render errors with friendly reload UI
+- Toast notifications — `ToastProvider` + `useToast()` hook, auto-dismiss, used on task delete/update and settings save
+- Code splitting — `React.lazy` + `Suspense` for all page components
+- Loading skeletons — pulse animation placeholders for task list and page loads
+- Empty state improvements — icons + CTAs on TasksPage, quick-action suggestion buttons on ChatPage
+- Keyboard shortcuts — `n` (new task), `/` (chat), `Escape` (close/blur)
+- Task editing — clicking a task opens pre-populated edit form inline
 
-### Phase 5: Backups, Monitoring & Launch — NOT STARTED
+**What was skipped/deferred:**
+- Push notifications (browser Notification API)
+- Swipe gestures
+- Virtual scrolling for long task lists
+
+### Phase 5: Backups, Monitoring & Launch — NOT STARTED (next phase)
 
 ### Key Files Reference
 
@@ -1370,12 +1384,16 @@ to-do-agent/
 │   │   ├── main.jsx                # Entry: React Query + Router + AuthProvider
 │   │   ├── App.jsx                 # Shell layout, routing, auth gating
 │   │   ├── context/AuthContext.jsx # Auth state, login/logout
-│   │   ├── services/api.js         # API client (tasks, AI, auth)
+│   │   ├── context/ThemeContext.jsx # Dark mode state + localStorage
+│   │   ├── services/api.js         # API client (tasks, AI, auth, user)
 │   │   ├── hooks/useTasks.js       # React Query hooks for task CRUD
-│   │   ├── pages/TasksPage.jsx     # Task list with filters
+│   │   ├── hooks/useKeyboardShortcuts.js # Global keyboard shortcuts
+│   │   ├── pages/TasksPage.jsx     # Task list with filters + inline edit
 │   │   ├── pages/ChatPage.jsx      # AI chat interface
-│   │   └── components/             # Header, Sidebar, TaskForm, TaskItem
-│   └── vite.config.js              # Dev proxy: /api → 127.0.0.1:5000
+│   │   ├── pages/SettingsPage.jsx  # User preferences
+│   │   └── components/             # Header, Sidebar, BottomNav, TaskForm, TaskItem,
+│   │                               # ErrorBoundary, Toast, LoadingSkeleton, OfflineIndicator
+│   └── vite.config.js              # Dev proxy + vite-plugin-pwa
 ├── server/
 │   ├── src/
 │   │   ├── index.js                # Express + Socket.io + MongoDB + cron jobs
@@ -1383,7 +1401,7 @@ to-do-agent/
 │   │   ├── config/logger.js        # Winston
 │   │   ├── middleware/auth.js      # JWT auth middleware
 │   │   ├── models/                 # User, Task, Conversation, UserPattern
-│   │   ├── routes/                 # auth, tasks, calendar, ai
+│   │   ├── routes/                 # auth, tasks, calendar, ai, user
 │   │   ├── services/ai.js          # Claude CLI subprocess + prompt building
 │   │   ├── services/calendar.js    # Google Calendar (with safety guards)
 │   │   └── jobs/                   # recurringTasks, morningCheckIn, patternLearning
@@ -1421,5 +1439,4 @@ This project plan provides a comprehensive roadmap to build your AI-powered pers
 - Reliable (automated backups, monitoring)
 
 **Next Steps:**
-1. Phase 4: PWA setup, mobile-responsive design, user settings, notifications
-2. Phase 5: Backups, monitoring, security hardening, testing, documentation
+1. Phase 5: Backups, monitoring, security hardening, testing, documentation
