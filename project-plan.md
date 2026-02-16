@@ -1289,22 +1289,137 @@ tail -f /var/log/backup.log
 
 ---
 
+## Current Implementation Status (as of 2026-02-15)
+
+**Git:** Initial commit `8704d10` on `main` branch. Working tree clean.
+
+### Phase 1: Foundation & Infrastructure — COMPLETE
+
+**What was built:**
+- Monorepo structure: `client/` (React + Vite + Tailwind) and `server/` (Express + Mongoose)
+- Google OAuth 2.0 authentication (Passport.js) with JWT session cookies
+- Docker configs: `docker-compose.yml` (production), `docker-compose.dev.yml` (dev)
+- Dockerfiles for client, server, and nginx reverse proxy
+- Winston logging (console + file)
+- `.env.example` with all required variables
+
+**What was skipped/deferred:**
+- AWS EC2 deployment (1.2) — developing locally for now
+- Docker not available on current macOS version — running server/client directly with `npm run dev`
+
+### Phase 2: Core Task Management — COMPLETE
+
+**What was built:**
+- Task model (`server/src/models/Task.js`) — full schema with all attributes, recurrence, dependencies, AI fields, calendar fields
+- Task CRUD API (`server/src/routes/tasks.js`) — create, list (filtering/sorting/pagination), get, update, soft delete, subtasks, status updates with dependency validation
+- Dependency logic — circular detection, completion blocking, parent auto-update from subtasks
+- Google Calendar integration (`server/src/services/calendar.js`, `server/src/routes/calendar.js`) — read events, schedule/reschedule/unschedule tasks
+  - **Safety:** Events tagged with `extendedProperties.private.managedBy = "todo-agent-managed"` — app will NEVER modify/delete events it didn't create
+  - Uses `calendar.events` scope (narrower than full `calendar` scope)
+- Recurring tasks (`server/src/jobs/recurringTasks.js`) — daily cron + startup, supports daily/weekly/monthly, deduplication
+- Frontend: TasksPage, TaskForm, TaskItem components, React Query hooks, API service layer
+- Auth gating — unauthenticated users see sign-in prompt
+
+**What was skipped/deferred:**
+- Drag-and-drop task organization (React DnD)
+- Frontend calendar view
+
+### Phase 3: AI Agent Integration — COMPLETE
+
+**What was built:**
+- AI service (`server/src/services/ai.js`) — uses Claude CLI (`claude -p`) as subprocess, piping prompts via stdin
+  - **Auth:** Uses `CLAUDE_CODE_OAUTH_TOKEN` env var (from `claude setup-token`) — no separate API billing
+  - **Important:** `ANTHROPIC_API_KEY` in `.env` must be set to placeholder value (or removed) — if present with a real key, Claude CLI will try to use it and fail
+- Context builder — aggregates pending tasks, calendar events, user patterns, recent conversations
+- System prompts tailored for: morning check-in, task planning, ad-hoc chat
+- Conversation model (`server/src/models/Conversation.js`) — full message history with channel tracking
+- Morning check-in system (`server/src/jobs/morningCheckIn.js`) — hourly cron matches user preferred time, Socket.io push notifications
+- Pattern learning (`server/src/jobs/patternLearning.js`) — weekly job calculates completion rates, productive hours, duration accuracy
+- UserPattern model (`server/src/models/UserPattern.js`)
+- AI routes (`server/src/routes/ai.js`): chat, morning-checkin, plan-day, estimate-duration, list/get conversations
+- Frontend chat page (`client/src/pages/ChatPage.jsx`) — message bubbles, "Morning Check-in" and "Plan My Day" buttons, conversation continuity
+
+**What was skipped/deferred:**
+- AI tool use / function calling (AI cannot create/modify tasks from chat yet — added to Phase 6+)
+- Email (SendGrid) and SMS (Twilio) channels
+- Socket.io real-time chat streaming (currently uses request/response)
+
+### Phase 4: Progressive Web App & Polish — NOT STARTED
+
+Next phase to implement. Includes:
+- PWA manifest + service worker (offline support)
+- Mobile-responsive design
+- User settings page
+- Notifications
+- Performance optimization
+
+### Phase 5: Backups, Monitoring & Launch — NOT STARTED
+
+### Key Files Reference
+
+```
+to-do-agent/
+├── .env                            # Local config (NOT committed) — see .env.example
+├── .env.example                    # Template with all required variables
+├── .gitignore
+├── project-plan.md                 # This file
+├── docker-compose.yml              # Production
+├── docker-compose.dev.yml          # Development
+├── client/
+│   ├── src/
+│   │   ├── main.jsx                # Entry: React Query + Router + AuthProvider
+│   │   ├── App.jsx                 # Shell layout, routing, auth gating
+│   │   ├── context/AuthContext.jsx # Auth state, login/logout
+│   │   ├── services/api.js         # API client (tasks, AI, auth)
+│   │   ├── hooks/useTasks.js       # React Query hooks for task CRUD
+│   │   ├── pages/TasksPage.jsx     # Task list with filters
+│   │   ├── pages/ChatPage.jsx      # AI chat interface
+│   │   └── components/             # Header, Sidebar, TaskForm, TaskItem
+│   └── vite.config.js              # Dev proxy: /api → 127.0.0.1:5000
+├── server/
+│   ├── src/
+│   │   ├── index.js                # Express + Socket.io + MongoDB + cron jobs
+│   │   ├── config/passport.js      # Google OAuth strategy
+│   │   ├── config/logger.js        # Winston
+│   │   ├── middleware/auth.js      # JWT auth middleware
+│   │   ├── models/                 # User, Task, Conversation, UserPattern
+│   │   ├── routes/                 # auth, tasks, calendar, ai
+│   │   ├── services/ai.js          # Claude CLI subprocess + prompt building
+│   │   ├── services/calendar.js    # Google Calendar (with safety guards)
+│   │   └── jobs/                   # recurringTasks, morningCheckIn, patternLearning
+│   └── package.json
+└── nginx/
+    ├── Dockerfile
+    └── nginx.conf                  # Reverse proxy config
+```
+
+### Development Setup (to resume)
+
+1. Ensure MongoDB Atlas is accessible (connection string in `.env`)
+2. Terminal 1: `cd ~/dev/to-do-agent/server && npm run dev`
+3. Terminal 2: `cd ~/dev/to-do-agent/client && npm run dev`
+4. Open `http://localhost:5173`
+
+**Known issues:**
+- Docker Desktop cannot be installed (requires macOS upgrade) — run services directly
+- Vite proxy must use `127.0.0.1` not `localhost` (IPv4/IPv6 mismatch)
+- `ANTHROPIC_API_KEY` in `.env` must be placeholder — Claude CLI picks it up and rejects it if set to a real OAuth token
+- Google Calendar token refresh works but calendar event fetch may warn on first load (tokens refresh automatically)
+
+---
+
 ## Conclusion
 
 This project plan provides a comprehensive roadmap to build your AI-powered personal task management system. The phased approach allows for iterative development while ensuring each component is production-ready before moving forward.
 
 **Key Strengths of This Architecture:**
-- ✅ Scalable (can handle growth)
-- ✅ Cost-effective (<$25/month)
-- ✅ Secure (OAuth, encrypted data)
-- ✅ Intelligent (learns from your patterns)
-- ✅ Flexible (multi-channel interaction)
-- ✅ Reliable (automated backups, monitoring)
+- Scalable (can handle growth)
+- Cost-effective (<$25/month)
+- Secure (OAuth, encrypted data)
+- Intelligent (learns from your patterns)
+- Flexible (multi-channel interaction)
+- Reliable (automated backups, monitoring)
 
 **Next Steps:**
-1. Review this plan and confirm approach
-2. Set up AWS account and services
-3. Begin Phase 1 (Foundation & Infrastructure)
-4. Iterate and adjust based on learnings
-
-I'm ready to start building! Let me know when you'd like to kick off Phase 1, and I'll begin with the infrastructure setup and Docker configuration.
+1. Phase 4: PWA setup, mobile-responsive design, user settings, notifications
+2. Phase 5: Backups, monitoring, security hardening, testing, documentation
