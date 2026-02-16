@@ -1,58 +1,29 @@
-const { spawn } = require('child_process');
+const Anthropic = require('@anthropic-ai/sdk');
 const Task = require('../models/Task');
 const Conversation = require('../models/Conversation');
 const UserPattern = require('../models/UserPattern');
 const calendarService = require('./calendar');
 const logger = require('../config/logger');
 
-const CLAUDE_PATH = '/Users/teletran-1/.local/bin/claude';
+function getAnthropicClient() {
+  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!token) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is not set');
+  logger.info(`Anthropic SDK call - token set: true, token length: ${token.length}`);
+  return new Anthropic({ apiKey: token });
+}
 
 /**
- * Call Claude CLI as a subprocess.
- * Pipes the prompt via stdin to avoid command-line argument length limits.
+ * Call Claude via the Anthropic SDK.
  */
-function callClaude(fullPrompt) {
-  return new Promise((resolve, reject) => {
-    const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}`);
-
-    const proc = spawn(CLAUDE_PATH, ['-p'], {
-      env: (() => {
-        const env = {
-          ...process.env,
-          HOME: process.env.HOME || '/Users/teletran-1',
-          CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
-        };
-        delete env.CLAUDECODE;
-        return env;
-      })(),
-      timeout: 120000,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        logger.error(`Claude CLI exited with code ${code} | stderr: ${stderr} | stdout: ${stdout}`);
-        reject(new Error('Failed to get response from Claude'));
-      } else {
-        resolve(stdout.trim());
-      }
-    });
-
-    proc.on('error', (err) => {
-      logger.error('Claude CLI spawn error:', err.message);
-      reject(new Error('Failed to get response from Claude'));
-    });
-
-    // Write prompt to stdin and close it
-    proc.stdin.write(fullPrompt);
-    proc.stdin.end();
+async function callClaude(systemPrompt, messages) {
+  const client = getAnthropicClient();
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    system: systemPrompt,
+    messages,
   });
+  return response.content[0].text;
 }
 
 /**
@@ -208,16 +179,8 @@ You're the user's productivity assistant. Help them with whatever they need:
 Keep responses concise. When the user asks you to create or modify tasks, describe what you'd change and confirm before proceeding.`;
 }
 
-function buildFullPrompt(systemPrompt, messageHistory) {
-  let prompt = `SYSTEM INSTRUCTIONS:\n${systemPrompt}\n\n---\n\nCONVERSATION:\n`;
-
-  for (const msg of messageHistory) {
-    const label = msg.role === 'user' ? 'User' : 'Assistant';
-    prompt += `${label}: ${msg.content}\n\n`;
-  }
-
-  prompt += 'Assistant:';
-  return prompt;
+function buildMessages(messageHistory) {
+  return messageHistory.map(m => ({ role: m.role, content: m.content }));
 }
 
 async function chat(user, message, conversationId = null, type = 'ad_hoc') {
@@ -240,13 +203,8 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   const context = await buildUserContext(user);
   const systemPrompt = buildSystemPrompt(conversation.type, user, context);
 
-  const messageHistory = conversation.messages.slice(-20).map(m => ({
-    role: m.role,
-    content: m.content,
-  }));
-
-  const fullPrompt = buildFullPrompt(systemPrompt, messageHistory);
-  const assistantMessage = await callClaude(fullPrompt);
+  const messages = buildMessages(conversation.messages.slice(-20));
+  const assistantMessage = await callClaude(systemPrompt, messages);
 
   conversation.messages.push({ role: 'assistant', content: assistantMessage });
   await conversation.save();
@@ -294,9 +252,7 @@ async function estimateDuration(user, taskId) {
       ).join('\n')
     : 'No similar completed tasks found.';
 
-  const fullPrompt = `${systemPrompt}
-
-Estimate how long this task will take:
+  const userMessage = `Estimate how long this task will take:
 Task: "${task.title}"
 Description: ${task.description || 'None'}
 Type: ${task.type}
@@ -307,7 +263,7 @@ ${similarInfo}
 
 Respond with ONLY a JSON object: {"estimate": <minutes>, "reasoning": "<brief explanation>"}`;
 
-  const response = await callClaude(fullPrompt);
+  const response = await callClaude(systemPrompt, [{ role: 'user', content: userMessage }]);
 
   try {
     const jsonMatch = response.match(/\{[\s\S]*\}/);
