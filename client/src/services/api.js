@@ -32,6 +32,7 @@ export const taskApi = {
   addSubtask: (id, data) =>
     request(`/tasks/${id}/subtasks`, { method: 'POST', body: JSON.stringify(data) }),
   getDependencies: (id) => request(`/tasks/${id}/dependencies`),
+  reorder: (tasks) => request('/tasks/reorder', { method: 'PUT', body: JSON.stringify({ tasks }) }),
 };
 
 export const aiApi = {

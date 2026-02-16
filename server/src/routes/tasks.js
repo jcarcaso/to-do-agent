@@ -9,6 +9,28 @@ const router = express.Router();
 // All task routes require authentication
 router.use(auth);
 
+// PUT /api/tasks/reorder - Bulk reorder tasks
+router.put('/reorder', async (req, res) => {
+  try {
+    const { tasks } = req.body;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      return res.status(400).json({ error: 'tasks array is required' });
+    }
+
+    const operations = tasks.map(({ id, sortOrder, status }) => ({
+      updateOne: {
+        filter: { _id: new mongoose.Types.ObjectId(id), userId: req.user._id },
+        update: { $set: { sortOrder, ...(status ? { status } : {}) } },
+      },
+    }));
+
+    await Task.bulkWrite(operations);
+    res.json({ message: 'Tasks reordered' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/tasks - Create task
 router.post('/', async (req, res) => {
   try {
@@ -40,7 +62,7 @@ router.get('/', async (req, res) => {
       search,
       dueBefore,
       dueAfter,
-      sort = '-createdAt',
+      sort = 'sortOrder -createdAt',
       page = 1,
       limit = 50,
       parentOnly,

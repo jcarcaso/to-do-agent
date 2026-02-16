@@ -7,15 +7,25 @@ const priorityColors = {
   critical: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300',
 };
 
-const statusIcons = {
-  pending: '○',
-  in_progress: '◐',
-  completed: '●',
-  archived: '◌',
+const statusCycle = ['pending', 'in_progress', 'completed'];
+
+const statusConfig = {
+  pending: { icon: '○', color: 'text-gray-400 hover:text-blue-500', label: 'Pending' },
+  in_progress: { icon: '◐', color: 'text-blue-500 hover:text-green-500', label: 'In Progress' },
+  completed: { icon: '●', color: 'text-green-500 hover:text-gray-400', label: 'Completed' },
+  archived: { icon: '◌', color: 'text-gray-300', label: 'Archived' },
 };
 
-function TaskItem({ task, onStatusChange, onDelete, onClick }) {
+function TaskItem({ task, onStatusChange, onDelete, onClick, dragHandleProps }) {
   const isCompleted = task.status === 'completed';
+
+  const nextStatus = () => {
+    const currentIndex = statusCycle.indexOf(task.status);
+    return statusCycle[(currentIndex + 1) % statusCycle.length];
+  };
+
+  const config = statusConfig[task.status] || statusConfig.pending;
+  const next = statusConfig[nextStatus()];
 
   return (
     <div
@@ -24,20 +34,32 @@ function TaskItem({ task, onStatusChange, onDelete, onClick }) {
       }`}
       onClick={() => onClick?.(task)}
     >
+      {dragHandleProps && (
+        <div
+          {...dragHandleProps}
+          onClick={(e) => e.stopPropagation()}
+          className="flex-shrink-0 text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 cursor-grab active:cursor-grabbing"
+          title="Drag to reorder"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="3" r="1.5" />
+            <circle cx="11" cy="3" r="1.5" />
+            <circle cx="5" cy="8" r="1.5" />
+            <circle cx="11" cy="8" r="1.5" />
+            <circle cx="5" cy="13" r="1.5" />
+            <circle cx="11" cy="13" r="1.5" />
+          </svg>
+        </div>
+      )}
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onStatusChange(
-            task._id,
-            isCompleted ? 'pending' : 'completed'
-          );
+          onStatusChange(task._id, nextStatus());
         }}
-        className={`text-lg flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center ${
-          isCompleted ? 'text-green-500' : 'text-gray-400 hover:text-green-500'
-        }`}
-        title={isCompleted ? 'Mark incomplete' : 'Mark complete'}
+        className={`text-lg flex-shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center transition-colors ${config.color}`}
+        title={`${config.label} — click for ${next.label}`}
       >
-        {statusIcons[task.status]}
+        {config.icon}
       </button>
 
       <div className="flex-1 min-w-0">

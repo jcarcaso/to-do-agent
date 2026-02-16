@@ -51,19 +51,50 @@ function KanbanCard({ task, index, onClick }) {
   );
 }
 
-function KanbanBoard({ tasks, onStatusChange, onTaskClick }) {
+function KanbanBoard({ tasks, onStatusChange, onTaskClick, onReorder }) {
+  const sortedTasks = [...tasks].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
   const grouped = {
-    pending: tasks.filter(t => t.status === 'pending'),
-    in_progress: tasks.filter(t => t.status === 'in_progress'),
-    completed: tasks.filter(t => t.status === 'completed'),
+    pending: sortedTasks.filter(t => t.status === 'pending'),
+    in_progress: sortedTasks.filter(t => t.status === 'in_progress'),
+    completed: sortedTasks.filter(t => t.status === 'completed'),
   };
 
   const handleDragEnd = (result) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
-    if (destination.droppableId === source.droppableId) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
-    onStatusChange(draggableId, destination.droppableId);
+    const destStatus = destination.droppableId;
+    const sourceStatus = source.droppableId;
+    const isSameColumn = destStatus === sourceStatus;
+
+    // Build the new ordered list for the destination column
+    const destItems = [...grouped[destStatus]];
+
+    if (isSameColumn) {
+      // Reorder within same column
+      const [moved] = destItems.splice(source.index, 1);
+      destItems.splice(destination.index, 0, moved);
+    } else {
+      // Move from source to destination
+      const task = tasks.find(t => t._id === draggableId);
+      if (!task) return;
+      destItems.splice(destination.index, 0, task);
+    }
+
+    // Compute new sortOrder values for all items in the destination column
+    const reorderData = destItems.map((t, i) => ({
+      id: t._id,
+      sortOrder: i + 1,
+      ...(t._id === draggableId && !isSameColumn ? { status: destStatus } : {}),
+    }));
+
+    if (onReorder) {
+      onReorder(reorderData, destStatus, isSameColumn ? null : sourceStatus);
+    } else if (!isSameColumn) {
+      onStatusChange(draggableId, destStatus);
+    }
   };
 
   return (

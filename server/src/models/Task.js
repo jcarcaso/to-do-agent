@@ -79,6 +79,9 @@ const taskSchema = new mongoose.Schema({
     ref: 'Task',
   }],
 
+  // Sort order for manual reordering
+  sortOrder: { type: Number, default: 0 },
+
   // Calendar Integration
   googleCalendarEventId: String,
   scheduledStart: Date,
@@ -91,5 +94,6 @@ const taskSchema = new mongoose.Schema({
 taskSchema.index({ userId: 1, status: 1 });
 taskSchema.index({ userId: 1, dueDate: 1 });
 taskSchema.index({ userId: 1, priority: 1 });
+taskSchema.index({ userId: 1, status: 1, sortOrder: 1 });
 
 module.exports = mongoose.model('Task', taskSchema);

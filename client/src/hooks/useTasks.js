@@ -43,6 +43,16 @@ export function useDeleteTask() {
   });
 }
 
+export function useReorderTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: taskApi.reorder,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+  });
+}
+
 export function useUpdateTaskStatus() {
   const queryClient = useQueryClient();
   return useMutation({

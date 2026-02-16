@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useTasks, useCreateTask, useUpdateTask, useUpdateTaskStatus, useDeleteTask } from '../hooks/useTasks';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { useTasks, useCreateTask, useUpdateTask, useUpdateTaskStatus, useDeleteTask, useReorderTasks } from '../hooks/useTasks';
 import TaskForm from '../components/TaskForm';
 import TaskItem from '../components/TaskItem';
 import KanbanBoard from '../components/KanbanBoard';
@@ -38,6 +39,7 @@ function TasksPage() {
   const updateTask = useUpdateTask();
   const updateStatus = useUpdateTaskStatus();
   const deleteTask = useDeleteTask();
+  const reorderTasks = useReorderTasks();
 
   const toggleView = (v) => {
     setView(v);
@@ -92,6 +94,67 @@ function TasksPage() {
       // Revert on error
       queryClient.setQueryData(['tasks', queryParams], prevData);
       addToast(err.message || 'Failed to update task status', 'error');
+    }
+  };
+
+  const handleBoardReorder = async (reorderData, destStatus, sourceStatus) => {
+    const prevData = queryClient.getQueryData(['tasks', queryParams]);
+
+    // Optimistic update
+    queryClient.setQueryData(['tasks', queryParams], (old) => {
+      if (!old?.tasks) return old;
+      const updates = new Map(reorderData.map(r => [r.id, r]));
+      return {
+        ...old,
+        tasks: old.tasks.map(t => {
+          const update = updates.get(t._id);
+          if (update) {
+            return { ...t, sortOrder: update.sortOrder, ...(update.status ? { status: update.status } : {}) };
+          }
+          return t;
+        }),
+      };
+    });
+
+    try {
+      await taskApi.reorder(reorderData);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (err) {
+      queryClient.setQueryData(['tasks', queryParams], prevData);
+      addToast(err.message || 'Failed to reorder tasks', 'error');
+    }
+  };
+
+  const handleListDragEnd = async (result) => {
+    const { destination, source } = result;
+    if (!destination) return;
+    if (destination.index === source.index) return;
+
+    const tasks = data?.tasks;
+    if (!tasks) return;
+
+    const reordered = [...tasks];
+    const [moved] = reordered.splice(source.index, 1);
+    reordered.splice(destination.index, 0, moved);
+
+    const reorderData = reordered.map((t, i) => ({ id: t._id, sortOrder: i + 1 }));
+
+    // Optimistic update
+    const prevData = queryClient.getQueryData(['tasks', queryParams]);
+    queryClient.setQueryData(['tasks', queryParams], (old) => {
+      if (!old?.tasks) return old;
+      const orderMap = new Map(reorderData.map(r => [r.id, r.sortOrder]));
+      const updated = old.tasks.map(t => ({ ...t, sortOrder: orderMap.get(t._id) ?? t.sortOrder }));
+      updated.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+      return { ...old, tasks: updated };
+    });
+
+    try {
+      await taskApi.reorder(reorderData);
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } catch (err) {
+      queryClient.setQueryData(['tasks', queryParams], prevData);
+      addToast(err.message || 'Failed to reorder tasks', 'error');
     }
   };
 
@@ -202,6 +265,7 @@ function TasksPage() {
         <KanbanBoard
           tasks={boardTasks}
           onStatusChange={handleBoardStatusChange}
+          onReorder={handleBoardReorder}
           onTaskClick={(task) => {
             setSelectedTask(task);
             setShowForm(false);
@@ -210,21 +274,42 @@ function TasksPage() {
       )}
 
       {/* List view */}
-      {!isBoard && (
-        <div className="space-y-2">
-          {data?.tasks?.map(task => (
-            <TaskItem
-              key={task._id}
-              task={task}
-              onStatusChange={handleStatusChange}
-              onDelete={handleDelete}
-              onClick={(task) => {
-                setSelectedTask(task);
-                setShowForm(false);
-              }}
-            />
-          ))}
-        </div>
+      {!isBoard && data?.tasks && data.tasks.length > 0 && (
+        <DragDropContext onDragEnd={handleListDragEnd}>
+          <Droppable droppableId="task-list">
+            {(provided) => (
+              <div
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+                className="space-y-2"
+              >
+                {data.tasks.map((task, index) => (
+                  <Draggable key={task._id} draggableId={task._id} index={index}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className={snapshot.isDragging ? 'shadow-lg rounded-lg' : ''}
+                      >
+                        <TaskItem
+                          task={task}
+                          onStatusChange={handleStatusChange}
+                          onDelete={handleDelete}
+                          onClick={(task) => {
+                            setSelectedTask(task);
+                            setShowForm(false);
+                          }}
+                          dragHandleProps={provided.dragHandleProps}
+                        />
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
       )}
 
       {!isBoard && data?.pagination?.pages > 1 && (
