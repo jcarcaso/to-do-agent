@@ -70,7 +70,11 @@ router.get('/', async (req, res) => {
 
     const filter = { userId: req.user._id };
 
-    if (status) filter.status = status;
+    if (status) {
+      filter.status = status;
+    } else {
+      filter.status = { $ne: 'archived' };
+    }
     if (type) filter.type = type;
     if (priority) filter.priority = priority;
     if (search) {
@@ -97,6 +101,7 @@ router.get('/', async (req, res) => {
         .skip(skip)
         .limit(parseInt(limit))
         .populate('subtasks', 'title status priority')
+        .populate('dependencies', 'title status')
         .lean(),
       Task.countDocuments(filter),
     ]);

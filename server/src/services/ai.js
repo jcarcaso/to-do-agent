@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const Task = require('../models/Task');
 const Conversation = require('../models/Conversation');
+const User = require('../models/User');
 const UserPattern = require('../models/UserPattern');
 const calendarService = require('./calendar');
 const { updateParentStatus } = require('./taskHelpers');
@@ -63,8 +64,9 @@ async function buildUserContext(user) {
   const now = new Date();
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(now);
-  endOfDay.setHours(23, 59, 59, 999);
+  const endOfRange = new Date(now);
+  endOfRange.setDate(endOfRange.getDate() + 2);
+  endOfRange.setHours(23, 59, 59, 999);
 
   const tasks = await Task.find({
     userId: user._id,
@@ -76,12 +78,22 @@ async function buildUserContext(user) {
     .lean();
 
   let calendarEvents = [];
-  try {
-    if (user.googleCalendarTokens?.accessToken) {
-      calendarEvents = await calendarService.getEvents(user, startOfDay, endOfDay);
+  if (user.googleCalendarTokens?.accessToken) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        calendarEvents = await calendarService.getEvents(user, startOfDay, endOfRange);
+        break;
+      } catch (err) {
+        logger.warn(`Could not fetch calendar events: ${err.message || JSON.stringify(err)}`);
+        if (attempt === 0) {
+          // Reload user to pick up refreshed tokens (auto-refresh saves new tokens async)
+          const freshUser = await User.findById(user._id);
+          if (freshUser?.googleCalendarTokens?.accessToken) {
+            user.googleCalendarTokens = freshUser.googleCalendarTokens;
+          }
+        }
+      }
     }
-  } catch (err) {
-    logger.warn('Could not fetch calendar events:', err.message);
   }
 
   const patterns = await UserPattern.findOne({ userId: user._id }).lean();
@@ -116,16 +128,21 @@ function formatTasks(tasks) {
 }
 
 function formatCalendar(events) {
-  if (!events.length) return 'No calendar events today.';
+  if (!events.length) return 'No calendar events in the next 3 days.';
 
   return events.map(e => {
-    const start = e.start?.dateTime
-      ? new Date(e.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const startDt = e.start?.dateTime ? new Date(e.start.dateTime) : null;
+    const endDt = e.end?.dateTime ? new Date(e.end.dateTime) : null;
+    const date = startDt
+      ? startDt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+      : e.start?.date || '';
+    const start = startDt
+      ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : 'All day';
-    const end = e.end?.dateTime
-      ? new Date(e.end.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const end = endDt
+      ? endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
-    return `- ${start}${end ? ` - ${end}` : ''}: ${e.summary || '(No title)'}`;
+    return `- ${date} ${start}${end ? ` - ${end}` : ''}: ${e.summary || '(No title)'}`;
   }).join('\n');
 }
 
@@ -160,7 +177,7 @@ USER CONTEXT:
 PENDING TASKS:
 ${formatTasks(context.tasks)}
 
-TODAY'S CALENDAR:
+CALENDAR (next 3 days):
 ${formatCalendar(context.calendarEvents)}
 
 USER PATTERNS:

@@ -14,7 +14,16 @@ const COLUMNS = [
   { id: 'completed', label: 'Completed', icon: '●', borderColor: 'border-t-green-500', bg: 'bg-green-50/50 dark:bg-green-900/10' },
 ];
 
-function KanbanCard({ task, index, onClick }) {
+function truncate(str, max = 20) {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max) + '...' : str;
+}
+
+function KanbanCard({ task, index, onClick, isBlocked }) {
+  const incompleteDeps = (task.dependencies || []).filter(d => d.status !== 'completed');
+  const hasSubtasks = task.subtasks?.length > 0;
+  const completedSubtasks = hasSubtasks ? task.subtasks.filter(s => s.status === 'completed').length : 0;
+
   return (
     <Draggable draggableId={task._id} index={index}>
       {(provided, snapshot) => (
@@ -25,11 +34,36 @@ function KanbanCard({ task, index, onClick }) {
           onClick={() => onClick?.(task)}
           className={`p-3 mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 cursor-grab active:cursor-grabbing transition-shadow ${
             snapshot.isDragging ? 'shadow-lg ring-2 ring-blue-400' : 'hover:shadow-sm'
-          }`}
+          } ${isBlocked ? 'border-l-4 border-l-red-400 dark:border-l-red-600 opacity-80' : ''}`}
         >
           <div className="font-medium text-sm text-gray-800 dark:text-gray-100 mb-1.5 line-clamp-2">
             {task.title}
           </div>
+
+          {/* Blocked badge */}
+          {isBlocked && (
+            <div className="mb-1.5">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-medium">
+                <svg width="8" height="8" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                Blocked
+              </span>
+            </div>
+          )}
+
+          {/* Blocked by chips (compact: 1 max + overflow) */}
+          {incompleteDeps.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800">
+                Blocked by: {truncate(incompleteDeps[0].title)}
+              </span>
+              {incompleteDeps.length > 1 && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800">
+                  +{incompleteDeps.length - 1} more
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`px-1.5 py-0.5 rounded text-xs ${priorityColors[task.priority]}`}>
               {task.priority}
@@ -44,6 +78,11 @@ function KanbanCard({ task, index, onClick }) {
                 {task.estimatedDuration}m
               </span>
             )}
+            {hasSubtasks && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {completedSubtasks}/{task.subtasks.length} subtasks
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -51,7 +90,7 @@ function KanbanCard({ task, index, onClick }) {
   );
 }
 
-function KanbanBoard({ tasks, onStatusChange, onTaskClick, onReorder }) {
+function KanbanBoard({ tasks, onStatusChange, onTaskClick, onReorder, blockedTaskIds }) {
   const sortedTasks = [...tasks].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
   const grouped = {
@@ -124,6 +163,7 @@ function KanbanBoard({ tasks, onStatusChange, onTaskClick, onReorder }) {
                       task={task}
                       index={index}
                       onClick={onTaskClick}
+                      isBlocked={blockedTaskIds?.has(task._id)}
                     />
                   ))}
                   {provided.placeholder}

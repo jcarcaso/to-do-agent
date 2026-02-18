@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useTasks, useCreateTask, useUpdateTask, useUpdateTaskStatus, useDeleteTask, useReorderTasks } from '../hooks/useTasks';
@@ -8,6 +8,7 @@ import KanbanBoard from '../components/KanbanBoard';
 import TaskFilters from '../components/TaskFilters';
 import { useToast } from '../components/Toast';
 import { taskApi } from '../services/api';
+import { computeDependencyInfo } from '../utils/taskDependencies';
 
 const FILTERS = [
   { label: 'All', value: '' },
@@ -41,6 +42,11 @@ function TasksPage() {
   const deleteTask = useDeleteTask();
   const reorderTasks = useReorderTasks();
 
+  const { blockedTaskIds, reverseDepMap } = useMemo(
+    () => computeDependencyInfo(data?.tasks),
+    [data?.tasks]
+  );
+
   const toggleView = (v) => {
     setView(v);
     localStorage.setItem('tasksView', v);
@@ -62,6 +68,10 @@ function TasksPage() {
   };
 
   const handleStatusChange = (id, status) => {
+    if (status === 'completed' && blockedTaskIds.has(id)) {
+      addToast('Cannot complete: this task has unfinished dependencies', 'error');
+      return;
+    }
     updateStatus.mutate({ id, status });
   };
 
@@ -74,6 +84,10 @@ function TasksPage() {
   };
 
   const handleBoardStatusChange = async (taskId, newStatus) => {
+    if (newStatus === 'completed' && blockedTaskIds.has(taskId)) {
+      addToast('Cannot complete: this task has unfinished dependencies', 'error');
+      return;
+    }
     // Optimistic update: move the task in cache immediately
     const prevData = queryClient.getQueryData(['tasks', queryParams]);
 
@@ -204,7 +218,11 @@ function TasksPage() {
 
       {showForm && !selectedTask && (
         <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-          <TaskForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
+          <TaskForm
+            onSubmit={handleCreate}
+            onCancel={() => setShowForm(false)}
+            availableTasks={data?.tasks || []}
+          />
         </div>
       )}
 
@@ -217,6 +235,7 @@ function TasksPage() {
             initialData={selectedTask}
             onSubmit={handleEdit}
             onCancel={() => setSelectedTask(null)}
+            availableTasks={(data?.tasks || []).filter(t => t._id !== selectedTask?._id)}
           />
         </div>
       )}
@@ -270,6 +289,7 @@ function TasksPage() {
             setSelectedTask(task);
             setShowForm(false);
           }}
+          blockedTaskIds={blockedTaskIds}
         />
       )}
 
@@ -300,6 +320,8 @@ function TasksPage() {
                             setShowForm(false);
                           }}
                           dragHandleProps={provided.dragHandleProps}
+                          isBlocked={blockedTaskIds.has(task._id)}
+                          reverseDeps={reverseDepMap.get(task._id) || []}
                         />
                       </div>
                     )}
