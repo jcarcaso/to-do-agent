@@ -12,9 +12,16 @@ const app = express();
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      "default-src": ["'self'"],
+      "base-uri": ["'self'"],
+      "font-src": ["'self'", "https:", "data:"],
+      "form-action": ["'self'"],
+      "frame-ancestors": ["'self'"],
       "img-src": ["'self'", "data:", "https://lh3.googleusercontent.com"],
-      "upgrade-insecure-requests": null,
+      "object-src": ["'none'"],
+      "script-src": ["'self'"],
+      "script-src-attr": ["'none'"],
+      "style-src": ["'self'", "https:", "'unsafe-inline'"],
     },
   },
   crossOriginResourcePolicy: { policy: "cross-origin" },
