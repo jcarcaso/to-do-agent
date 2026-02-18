@@ -21,5 +21,5 @@ echo "Restarting application..."
 pm2 restart to-do-agent || pm2 start src/index.js --name to-do-agent
 
 echo "Deploy complete. Waiting for health check..."
-sleep 3
+sleep 5
 curl -sf http://localhost:5000/health && echo " OK" || echo " FAILED"
