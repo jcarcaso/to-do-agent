@@ -56,11 +56,14 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
             APP_DIR="/home/${{ secrets.EC2_USER }}/to-do-agent"
 
             # First deploy: clone. Subsequent: pull.
             if [ ! -d "$APP_DIR" ]; then
-              git clone git@github.com:jcarcaso/to-do-agent.git "$APP_DIR"
+              git clone https://github.com/jcarcaso/to-do-agent.git "$APP_DIR"
             fi
 
             # Write production .env
