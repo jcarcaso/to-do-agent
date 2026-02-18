@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load Node/npm/pm2 into PATH for non-interactive shells (e.g. GitHub Actions SSH)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:$PATH"
+
 APP_DIR="/home/ubuntu/to-do-agent"
 
 cd "$APP_DIR"
