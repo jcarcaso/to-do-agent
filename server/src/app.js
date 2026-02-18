@@ -14,7 +14,7 @@ app.use(helmet({
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
       "img-src": ["'self'", "data:", "https://lh3.googleusercontent.com"],
-      "upgrade-insecure-requests": [],
+      "upgrade-insecure-requests": null,
     },
   },
   crossOriginResourcePolicy: { policy: "cross-origin" },
