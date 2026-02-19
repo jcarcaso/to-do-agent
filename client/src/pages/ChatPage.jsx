@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { aiApi } from '../services/api';
+import { useConversations } from '../hooks/useConversations';
 
 const QUICK_ACTIONS = [
   { label: 'What should I work on next?', message: 'What should I work on next?' },
@@ -16,6 +17,9 @@ const ACTION_STYLES = {
   start_task: { bg: 'bg-blue-50 dark:bg-blue-900/20', border: 'border-blue-200 dark:border-blue-800', icon: '▶', label: 'Started' },
   delete_task: { bg: 'bg-red-50 dark:bg-red-900/20', border: 'border-red-200 dark:border-red-800', icon: '✕', label: 'Archived' },
 };
+
+// Module-level cache to survive component unmount/remount
+const chatCache = { messages: [], conversationId: null };
 
 function ActionCard({ action }) {
   const style = ACTION_STYLES[action.type] || ACTION_STYLES.update_task;
@@ -41,18 +45,51 @@ function ActionCard({ action }) {
   );
 }
 
+const TYPE_LABELS = {
+  chat: 'Chat',
+  'morning-checkin': 'Check-in',
+  'plan-day': 'Plan Day',
+};
+
+function formatDate(dateStr) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 function ChatPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(chatCache.messages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [conversationId, setConversationId] = useState(null);
+  const [conversationId, setConversationId] = useState(chatCache.conversationId);
+  const [showHistory, setShowHistory] = useState(false);
   const messagesEndRef = useRef(null);
+
+  const { data: conversations, isLoading: historyLoading } = useConversations();
+
+  // Sync state back to module-level cache
+  useEffect(() => {
+    chatCache.messages = messages;
+    chatCache.conversationId = conversationId;
+  }, [messages, conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const invalidateConversations = () => {
+    queryClient.invalidateQueries({ queryKey: ['conversations'] });
+  };
 
   const handleResult = (result, userContent) => {
     setConversationId(result.conversationId);
@@ -91,6 +128,7 @@ function ChatPage() {
         queryClient.invalidateQueries({ queryKey: ['tasks'] });
       }
       setMessages(prev => [...prev, assistantMsg]);
+      invalidateConversations();
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }]);
     } finally {
@@ -119,6 +157,7 @@ function ChatPage() {
       } else {
         setMessages([{ role: 'assistant', content: result.message }]);
       }
+      invalidateConversations();
     } catch (err) {
       setMessages([{ role: 'assistant', content: `Error: ${err.message}` }]);
     } finally {
@@ -143,6 +182,7 @@ function ChatPage() {
         { role: 'user', content: 'Please help me plan my day.' },
         assistantMsg,
       ]);
+      invalidateConversations();
     } catch (err) {
       setMessages([{ role: 'assistant', content: `Error: ${err.message}` }]);
     } finally {
@@ -154,7 +194,28 @@ function ChatPage() {
     setMessages([]);
     setConversationId(null);
     setInput('');
+    setShowHistory(false);
+    invalidateConversations();
   };
+
+  const loadConversation = async (id) => {
+    setLoading(true);
+    setShowHistory(false);
+    try {
+      const convo = await aiApi.getConversation(id);
+      setConversationId(convo._id || id);
+      const loadedMessages = (convo.messages || [])
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.content, actions: m.actions }));
+      setMessages(loadedMessages);
+    } catch (err) {
+      setMessages([{ role: 'assistant', content: `Error loading conversation: ${err.message}` }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const conversationList = conversations || [];
 
   return (
     <div className="max-w-3xl mx-auto w-full flex flex-col h-[calc(100vh-130px)] md:h-[calc(100vh-130px)]" style={{ maxHeight: 'calc(100vh - 130px - env(safe-area-inset-bottom, 0px))' }}>
@@ -176,6 +237,16 @@ function ChatPage() {
             Plan My Day
           </button>
           <button
+            onClick={() => setShowHistory(prev => !prev)}
+            className={`px-3 py-1.5 text-xs sm:text-sm rounded-lg transition ${
+              showHistory
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+            }`}
+          >
+            History
+          </button>
+          <button
             onClick={startNewChat}
             className="px-3 py-1.5 text-xs sm:text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
           >
@@ -184,83 +255,139 @@ function ChatPage() {
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
-        {messages.length === 0 && (
-          <div className="text-center py-12 sm:py-20 text-gray-400 dark:text-gray-500">
-            <svg className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            <p className="text-lg">Hi {user?.name?.split(' ')[0]}! How can I help you today?</p>
-            <p className="text-sm mt-2 mb-6">Ask me about your tasks, or try one of these:</p>
-            <div className="flex flex-col sm:flex-row gap-2 justify-center max-w-md mx-auto">
-              {QUICK_ACTIONS.map(({ label, message }) => (
-                <button
-                  key={label}
-                  onClick={() => sendMessage(message)}
-                  className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg, i) => (
-          <div key={i}>
-            <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] sm:max-w-[80%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-md'
-                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-md'
-                }`}
-              >
-                {msg.content}
+      {/* History Panel */}
+      {showHistory && (
+        <div className="flex-1 overflow-y-auto pb-4">
+          <div className="space-y-2">
+            {historyLoading && (
+              <div className="text-center py-8 text-gray-400 dark:text-gray-500">
+                Loading conversations...
               </div>
-            </div>
-            {msg.actions?.length > 0 && (
-              <div className="flex justify-start mt-2">
-                <div className="max-w-[85%] sm:max-w-[80%] space-y-1.5">
-                  {msg.actions.map((action, j) => (
-                    <ActionCard key={j} action={action} />
+            )}
+            {!historyLoading && conversationList.length === 0 && (
+              <div className="text-center py-8 text-gray-400 dark:text-gray-500">
+                No past conversations yet.
+              </div>
+            )}
+            {conversationList.map((convo) => {
+              const firstUserMsg = convo.messages?.find(m => m.role === 'user');
+              const preview = firstUserMsg?.content || convo.messages?.[0]?.content || 'No messages';
+              const msgCount = convo.messages?.length || 0;
+              const typeLabel = TYPE_LABELS[convo.type] || convo.type || 'Chat';
+              const isActive = convo._id === conversationId;
+
+              return (
+                <button
+                  key={convo._id}
+                  onClick={() => loadConversation(convo._id)}
+                  className={`w-full text-left px-4 py-3 rounded-lg border transition hover:bg-gray-50 dark:hover:bg-gray-750 ${
+                    isActive
+                      ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                      {typeLabel}
+                    </span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      {formatDate(convo.updatedAt || convo.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-800 dark:text-gray-100 truncate">
+                    {preview}
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    {msgCount} message{msgCount !== 1 ? 's' : ''}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Messages */}
+      {!showHistory && (
+        <>
+          <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+            {messages.length === 0 && (
+              <div className="text-center py-12 sm:py-20 text-gray-400 dark:text-gray-500">
+                <svg className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                <p className="text-lg">Hi {user?.name?.split(' ')[0]}! How can I help you today?</p>
+                <p className="text-sm mt-2 mb-6">Ask me about your tasks, or try one of these:</p>
+                <div className="flex flex-col sm:flex-row gap-2 justify-center max-w-md mx-auto">
+                  {QUICK_ACTIONS.map(({ label, message }) => (
+                    <button
+                      key={label}
+                      onClick={() => sendMessage(message)}
+                      className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition"
+                    >
+                      {label}
+                    </button>
                   ))}
                 </div>
               </div>
             )}
+
+            {messages.map((msg, i) => (
+              <div key={i}>
+                <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[85%] sm:max-w-[80%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
+                      msg.role === 'user'
+                        ? 'bg-blue-600 text-white rounded-br-md'
+                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-md'
+                    }`}
+                  >
+                    {msg.content}
+                  </div>
+                </div>
+                {msg.actions?.length > 0 && (
+                  <div className="flex justify-start mt-2">
+                    <div className="max-w-[85%] sm:max-w-[80%] space-y-1.5">
+                      {msg.actions.map((action, j) => (
+                        <ActionCard key={j} action={action} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-3 rounded-2xl rounded-bl-md text-gray-400 dark:text-gray-500">
+                  Thinking...
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
           </div>
-        ))}
 
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-3 rounded-2xl rounded-bl-md text-gray-400 dark:text-gray-500">
-              Thinking...
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input */}
-      <form onSubmit={sendMessage} className="flex gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message..."
-          disabled={loading}
-          className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || loading}
-          className="px-4 sm:px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
-        >
-          Send
-        </button>
-      </form>
+          {/* Input */}
+          <form onSubmit={sendMessage} className="flex gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Type a message..."
+              disabled={loading}
+              className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || loading}
+              className="px-4 sm:px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
+            >
+              Send
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }
