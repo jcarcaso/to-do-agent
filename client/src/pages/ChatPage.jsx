@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { aiApi } from '../services/api';
-import { useConversations } from '../hooks/useConversations';
+import { useConversations, useUpdateConversation } from '../hooks/useConversations';
 
 const QUICK_ACTIONS = [
   { label: 'What should I work on next?', message: 'What should I work on next?' },
@@ -73,9 +73,13 @@ function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState(chatCache.conversationId);
   const [showHistory, setShowHistory] = useState(false);
+  const [editingConvoId, setEditingConvoId] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const { data: conversations, isLoading: historyLoading } = useConversations();
+  const updateConversation = useUpdateConversation();
 
   // Sync state back to module-level cache
   useEffect(() => {
@@ -116,6 +120,9 @@ function ChatPage() {
     if (!text || loading) return;
 
     setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setLoading(true);
 
@@ -270,37 +277,83 @@ function ChatPage() {
               </div>
             )}
             {conversationList.map((convo) => {
-              const firstUserMsg = convo.messages?.find(m => m.role === 'user');
-              const preview = firstUserMsg?.content || convo.messages?.[0]?.content || 'No messages';
-              const msgCount = convo.messages?.length || 0;
+              const preview = convo.preview || 'No messages';
+              const msgCount = convo.messageCount || 0;
               const typeLabel = TYPE_LABELS[convo.type] || convo.type || 'Chat';
               const isActive = convo._id === conversationId;
+              const isEditing = editingConvoId === convo._id;
+              const displayTitle = convo.title || preview;
+
+              const saveTitle = () => {
+                const trimmed = editTitle.trim();
+                if (trimmed && trimmed !== convo.title) {
+                  updateConversation.mutate({ id: convo._id, data: { title: trimmed } });
+                }
+                setEditingConvoId(null);
+              };
 
               return (
-                <button
+                <div
                   key={convo._id}
-                  onClick={() => loadConversation(convo._id)}
-                  className={`w-full text-left px-4 py-3 rounded-lg border transition hover:bg-gray-50 dark:hover:bg-gray-750 ${
+                  className={`w-full text-left px-4 py-3 rounded-lg border transition hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer ${
                     isActive
                       ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20'
                       : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
                   }`}
+                  onClick={() => !isEditing && loadConversation(convo._id)}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                       {typeLabel}
                     </span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">
-                      {formatDate(convo.updatedAt || convo.createdAt)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 dark:text-gray-500">
+                        {formatDate(convo.updatedAt || convo.createdAt)}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingConvoId(convo._id);
+                          setEditTitle(convo.title || '');
+                        }}
+                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
+                        title="Rename conversation"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-sm text-gray-800 dark:text-gray-100 truncate">
-                    {preview}
-                  </p>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveTitle();
+                        if (e.key === 'Escape') setEditingConvoId(null);
+                      }}
+                      onBlur={saveTitle}
+                      onClick={(e) => e.stopPropagation()}
+                      autoFocus
+                      className="w-full text-sm px-2 py-1 border border-blue-400 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      placeholder="Conversation title..."
+                    />
+                  ) : (
+                    <p className="text-sm text-gray-800 dark:text-gray-100 truncate font-medium">
+                      {displayTitle}
+                    </p>
+                  )}
+                  {!isEditing && convo.title && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 truncate">
+                      {preview}
+                    </p>
+                  )}
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                     {msgCount} message{msgCount !== 1 ? 's' : ''}
                   </p>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -369,19 +422,34 @@ function ChatPage() {
           </div>
 
           {/* Input */}
-          <form onSubmit={sendMessage} className="flex gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <input
-              type="text"
+          <form onSubmit={(e) => e.preventDefault()} className="flex gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                const el = e.target;
+                el.style.height = 'auto';
+                const maxHeight = 6 * 24; // ~6 rows
+                el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px';
+                el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
               placeholder="Type a message..."
               disabled={loading}
-              className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 resize-none overflow-hidden"
             />
             <button
-              type="submit"
+              type="button"
+              onClick={() => sendMessage()}
               disabled={!input.trim() || loading}
-              className="px-4 sm:px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50"
+              className="px-4 sm:px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50 self-end"
             >
               Send
             </button>
