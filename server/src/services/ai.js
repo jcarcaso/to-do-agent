@@ -7,7 +7,7 @@ const calendarService = require('./calendar');
 const { updateParentStatus } = require('./taskHelpers');
 const logger = require('../config/logger');
 
-const CLAUDE_PATH = '/Users/teletran-1/.local/bin/claude';
+const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
 
 /**
  * Call Claude CLI as a subprocess.
