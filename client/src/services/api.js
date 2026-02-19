@@ -49,6 +49,8 @@ export const aiApi = {
     return request(`/ai/conversations${query ? `?${query}` : ''}`);
   },
   getConversation: (id) => request(`/ai/conversations/${id}`),
+  updateConversation: (id, data) =>
+    request(`/ai/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 export const authApi = {

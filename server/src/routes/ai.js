@@ -77,12 +77,13 @@ router.get('/conversations', async (req, res) => {
     const conversations = await Conversation.find(filter)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
-      .select('type channel status createdAt messages')
+      .select('title type channel status createdAt messages')
       .lean();
 
     // Include preview (last message) for each
     const previews = conversations.map(c => ({
       _id: c._id,
+      title: c.title,
       type: c.type,
       channel: c.channel,
       status: c.status,
@@ -92,6 +93,31 @@ router.get('/conversations', async (req, res) => {
     }));
 
     res.json(previews);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/ai/conversations/:id - Update conversation (e.g. rename)
+router.patch('/conversations/:id', async (req, res) => {
+  try {
+    const { title } = req.body;
+
+    if (title === undefined) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    const conversation = await Conversation.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user._id },
+      { title },
+      { new: true, runValidators: true }
+    );
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    res.json(conversation);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -398,7 +398,24 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
     });
   }
 
+  const isNewConversation = !conversationId;
+
   conversation.messages.push({ role: 'user', content: message });
+
+  // Auto-generate title for new conversations (fire-and-forget)
+  if (isNewConversation) {
+    const convoId = conversation._id;
+    callClaude(`Summarize this message in 2-4 words as a conversation title. Return only the title, no quotes or punctuation.\n\nMessage: ${message}`)
+      .then(title => {
+        const cleanTitle = title.replace(/^["']|["']$/g, '').trim();
+        if (cleanTitle) {
+          Conversation.findByIdAndUpdate(convoId, { title: cleanTitle }).catch(err =>
+            logger.warn('Failed to save auto-generated title:', err.message)
+          );
+        }
+      })
+      .catch(err => logger.warn('Failed to generate conversation title:', err.message));
+  }
 
   const context = await buildUserContext(user);
   const systemPrompt = buildSystemPrompt(conversation.type, user, context);

@@ -28,6 +28,10 @@ const conversationSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  title: {
+    type: String,
+    default: '',
+  },
   type: {
     type: String,
     enum: ['morning_checkin', 'task_planning', 'ad_hoc'],
