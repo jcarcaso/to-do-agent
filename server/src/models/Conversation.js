@@ -58,5 +58,6 @@ const conversationSchema = new mongoose.Schema({
 });
 
 conversationSchema.index({ userId: 1, createdAt: -1 });
+conversationSchema.index({ updatedAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
 
 module.exports = mongoose.model('Conversation', conversationSchema);
