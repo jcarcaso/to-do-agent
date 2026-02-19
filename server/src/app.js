@@ -26,9 +26,6 @@ app.use(helmet({
     },
   },
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  // Disable headers that require HTTPS — re-enable when HTTPS is configured
-  strictTransportSecurity: false,
-  crossOriginOpenerPolicy: false,
 }));
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
