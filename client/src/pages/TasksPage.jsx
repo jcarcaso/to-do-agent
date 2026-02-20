@@ -19,7 +19,7 @@ const FILTERS = [
 
 function TasksPage() {
   const [view, setView] = useState(() => localStorage.getItem('tasksView') || 'list');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('in_progress');
   const [filters, setFilters] = useState({ search: '', priority: '', type: '' });
   const [showForm, setShowForm] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
