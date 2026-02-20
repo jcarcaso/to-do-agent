@@ -52,19 +52,15 @@ function TasksPage() {
     localStorage.setItem('tasksView', v);
   };
 
-  const handleCreate = (taskData) => {
-    createTask.mutate(taskData, {
-      onSuccess: () => setShowForm(false),
-    });
+  const handleCreate = async (taskData) => {
+    await createTask.mutateAsync(taskData);
+    setShowForm(false);
   };
 
-  const handleEdit = (taskData) => {
-    updateTask.mutate({ id: selectedTask._id, ...taskData }, {
-      onSuccess: () => {
-        setSelectedTask(null);
-        addToast('Task updated', 'success');
-      },
-    });
+  const handleEdit = async (taskData) => {
+    await updateTask.mutateAsync({ id: selectedTask._id, ...taskData });
+    setSelectedTask(null);
+    addToast('Task updated', 'success');
   };
 
   const handleStatusChange = (id, status) => {

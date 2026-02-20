@@ -18,16 +18,23 @@ function TaskForm({ onSubmit, initialData, onCancel, availableTasks = [] }) {
     dependencies: initialData?.dependencies?.map(d => typeof d === 'object' ? d._id : d) || [],
   });
   const [depDropdownOpen, setDepDropdownOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSubmit({
-      ...form,
-      tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
-      estimatedDuration: form.estimatedDuration ? parseInt(form.estimatedDuration) : undefined,
-      dueDate: form.dueDate || undefined,
-      dependencies: form.dependencies.length > 0 ? form.dependencies : [],
-    });
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        ...form,
+        tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+        estimatedDuration: form.estimatedDuration ? parseInt(form.estimatedDuration) : undefined,
+        dueDate: form.dueDate || undefined,
+        dependencies: form.dependencies.length > 0 ? form.dependencies : [],
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const update = (field) => (e) => setForm({ ...form, [field]: e.target.value });
@@ -158,8 +165,8 @@ function TaskForm({ onSubmit, initialData, onCancel, availableTasks = [] }) {
             Cancel
           </button>
         )}
-        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-          {initialData ? 'Update' : 'Create'} Task
+        <button type="submit" disabled={submitting} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
+          {submitting ? 'Saving...' : `${initialData ? 'Update' : 'Create'} Task`}
         </button>
       </div>
     </form>
