@@ -436,7 +436,7 @@ function ChatPage() {
                 el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   sendMessage();
                 }
