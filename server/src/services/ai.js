@@ -88,21 +88,24 @@ function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = 
         logger.error(`Claude CLI exited with code ${code} | stderr: ${stderr} | stdout: ${stdout}`);
         reject(new Error('Failed to get response from Claude'));
       } else {
-        if (schema) {
-          try {
-            // --output-format json wraps the response; extract the result text and parse it
-            const outer = JSON.parse(stdout);
-            const text = typeof outer === 'string' ? outer : (outer.result || outer.text || outer.content || stdout);
-            resolve(typeof text === 'object' ? text : JSON.parse(text));
-          } catch (err) {
-            logger.error('Failed to parse structured response:', err.message, '| raw:', stdout.slice(0, 500));
-            reject(new Error('Failed to parse structured response from Claude'));
+        try {
+          const outer = JSON.parse(stdout);
+          if (schema) {
+            // --json-schema puts the validated object in structured_output
+            if (outer.structured_output) {
+              resolve(outer.structured_output);
+            } else {
+              logger.error('No structured_output in response | raw:', stdout.slice(0, 500));
+              reject(new Error('Failed to parse structured response from Claude'));
+            }
+          } else {
+            resolve(outer.result || stdout.trim());
           }
-        } else {
-          try {
-            const outer = JSON.parse(stdout);
-            resolve(typeof outer === 'string' ? outer : (outer.result || outer.text || outer.content || stdout.trim()));
-          } catch {
+        } catch (err) {
+          if (schema) {
+            logger.error('Failed to parse JSON response:', err.message, '| raw:', stdout.slice(0, 500));
+            reject(new Error('Failed to parse structured response from Claude'));
+          } else {
             resolve(stdout.trim());
           }
         }
