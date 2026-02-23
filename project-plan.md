@@ -1503,3 +1503,4 @@ This project plan provides a comprehensive roadmap to build your AI-powered pers
 2. Re-enable HSTS and COOP helmet headers now that HTTPS is live
 3. Verify Google OAuth works end-to-end on production
 4. Consider removing Docker configs (docker-compose.yml, Dockerfiles) since deployment uses PM2 directly
+5. Revisit Claude CLI `--agent` configuration to reduce per-prompt token usage — test whether the agent definition (`.claude/agents/task-manager.md`) can offload the base system prompt so only dynamic context (tasks, calendar, conversation history) is sent via stdin. Current approach sends the full system prompt + context on every message, including follow-ups in the same conversation.
