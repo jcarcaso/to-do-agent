@@ -9,27 +9,73 @@ const logger = require('../config/logger');
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
 
+// --- JSON schemas for structured output ---
+
+const chatResponseSchema = {
+  type: 'object',
+  properties: {
+    message: { type: 'string', description: 'Your conversational response to the user' },
+    actions: {
+      type: 'array',
+      description: 'Task actions to perform. Empty array if no actions needed.',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['create_task', 'update_task', 'complete_task', 'start_task', 'delete_task'] },
+          params: { type: 'object', description: 'Action parameters.' }
+        },
+        required: ['type', 'params']
+      }
+    }
+  },
+  required: ['message', 'actions']
+};
+
+const titleSchema = {
+  type: 'object',
+  properties: { title: { type: 'string', description: '2-4 word conversation title' } },
+  required: ['title']
+};
+
+const estimateSchema = {
+  type: 'object',
+  properties: {
+    estimate: { type: 'number', description: 'Estimated duration in minutes' },
+    reasoning: { type: 'string', description: 'Brief explanation' }
+  },
+  required: ['estimate', 'reasoning']
+};
+
+// --- Core Claude CLI caller ---
+
 /**
- * Call Claude CLI as a subprocess.
- * Pipes the prompt via stdin to avoid command-line argument length limits.
+ * Call Claude CLI as a subprocess using the task-manager agent.
+ * @param {string} userMessage - The user message / prompt to send via stdin
+ * @param {object} options
+ * @param {object} [options.schema] - JSON schema to enforce structured output
+ * @param {string} [options.appendSystemPrompt] - Additional system prompt context
  */
-function callClaude(fullPrompt) {
+function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = {}) {
   return new Promise((resolve, reject) => {
     const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}`);
 
-    const proc = spawn(CLAUDE_PATH, ['-p', '--model','haiku'], {
-      env: (() => {
-        const env = {
-          ...process.env,
-          HOME: process.env.HOME || '/Users/teletran-1',
-          CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
-        };
-        delete env.CLAUDECODE;
-        return env;
-      })(),
-      timeout: 120000,
-    });
+    const args = ['-p', '--agent', 'task-manager', '--output-format', 'json'];
+    if (schema) {
+      args.push('--json-schema', JSON.stringify(schema));
+    }
+    if (appendSystemPrompt) {
+      args.push('--append-system-prompt', appendSystemPrompt);
+    }
+
+    const env = {
+      ...process.env,
+      HOME: process.env.HOME || '/Users/teletran-1',
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    };
+    delete env.CLAUDECODE;
+
+    const proc = spawn(CLAUDE_PATH, args, { env, timeout: 120000 });
 
     let stdout = '';
     let stderr = '';
@@ -42,7 +88,24 @@ function callClaude(fullPrompt) {
         logger.error(`Claude CLI exited with code ${code} | stderr: ${stderr} | stdout: ${stdout}`);
         reject(new Error('Failed to get response from Claude'));
       } else {
-        resolve(stdout.trim());
+        if (schema) {
+          try {
+            // --output-format json wraps the response; extract the result text and parse it
+            const outer = JSON.parse(stdout);
+            const text = typeof outer === 'string' ? outer : (outer.result || outer.text || outer.content || stdout);
+            resolve(typeof text === 'object' ? text : JSON.parse(text));
+          } catch (err) {
+            logger.error('Failed to parse structured response:', err.message, '| raw:', stdout.slice(0, 500));
+            reject(new Error('Failed to parse structured response from Claude'));
+          }
+        } else {
+          try {
+            const outer = JSON.parse(stdout);
+            resolve(typeof outer === 'string' ? outer : (outer.result || outer.text || outer.content || stdout.trim()));
+          } catch {
+            resolve(stdout.trim());
+          }
+        }
       }
     });
 
@@ -51,15 +114,13 @@ function callClaude(fullPrompt) {
       reject(new Error('Failed to get response from Claude'));
     });
 
-    // Write prompt to stdin and close it
-    proc.stdin.write(fullPrompt);
+    proc.stdin.write(userMessage);
     proc.stdin.end();
   });
 }
 
-/**
- * Build context about the user's current state for Claude.
- */
+// --- Context builders (unchanged helpers) ---
+
 async function buildUserContext(user) {
   const now = new Date();
   const startOfDay = new Date(now);
@@ -86,7 +147,6 @@ async function buildUserContext(user) {
       } catch (err) {
         logger.warn(`Could not fetch calendar events: ${err.message || JSON.stringify(err)}`);
         if (attempt === 0) {
-          // Reload user to pick up refreshed tokens (auto-refresh saves new tokens async)
           const freshUser = await User.findById(user._id);
           if (freshUser?.googleCalendarTokens?.accessToken) {
             user.googleCalendarTokens = freshUser.googleCalendarTokens;
@@ -166,10 +226,10 @@ function formatPatterns(patterns) {
   return parts.length ? parts.join('\n') : 'Limited pattern data available.';
 }
 
-function buildSystemPrompt(type, user, context) {
-  const base = `You are an AI productivity assistant for a personal task management app called To-Do Agent. Be conversational, warm, but concise and actionable.
+// --- Dynamic context prompt (replaces buildSystemPrompt + buildFullPrompt) ---
 
-USER CONTEXT:
+function buildContextPrompt(type, user, context) {
+  let prompt = `USER CONTEXT:
 - Name: ${user.name}
 - Timezone: ${user.preferences?.timezone || 'America/New_York'}
 - Today: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
@@ -183,29 +243,10 @@ ${formatCalendar(context.calendarEvents)}
 USER PATTERNS:
 ${formatPatterns(context.patterns)}
 
-${context.recentSummary ? `RECENT CONVERSATION CONTEXT:\n${context.recentSummary}` : ''}
-
-AVAILABLE ACTIONS:
-You can perform task actions by including action blocks in your response. Use this format exactly:
-[ACTION: {"type": "create_task", "params": {"title": "...", "priority": "medium", "dueDate": "YYYY-MM-DD", "type": "other"}}]
-[ACTION: {"type": "update_task", "params": {"taskId": "...", "fields": {"title": "...", "priority": "...", "dueDate": "..."}}}]
-[ACTION: {"type": "complete_task", "params": {"taskId": "..."}}]
-[ACTION: {"type": "delete_task", "params": {"taskId": "..."}}]
-[ACTION: {"type": "start_task", "params": {"taskId": "..."}}]
-
-RULES FOR ACTIONS:
-- Only perform actions when the user explicitly asks you to create, update, complete, delete, or start a task.
-- Always confirm what you're doing in your text response.
-- Use task IDs from the PENDING TASKS list above.
-- If the user's request is ambiguous, ask for clarification instead of guessing.
-- You may include multiple actions in one response.
-- For create_task: "priority" defaults to "medium", "type" defaults to "other". Only "title" is required.
-- For update_task: only include fields that should change.`;
+${context.recentSummary ? `RECENT CONVERSATION CONTEXT:\n${context.recentSummary}` : ''}`;
 
   if (type === 'morning_checkin') {
-    return `${base}
-
-INSTRUCTIONS:
+    prompt += `\n\nINSTRUCTIONS:
 1. Greet the user warmly and briefly
 2. Summarize what's on their plate today (tasks + calendar)
 3. Suggest 3-5 tasks to focus on based on due dates, priorities, available time, and their productive hours
@@ -214,12 +255,8 @@ INSTRUCTIONS:
 6. Offer to block time on their calendar for selected tasks
 
 Be encouraging but realistic. Don't overload their day. If they have limited time, suggest fewer tasks or breaking large tasks into smaller pieces.`;
-  }
-
-  if (type === 'task_planning') {
-    return `${base}
-
-INSTRUCTIONS:
+  } else if (type === 'task_planning') {
+    prompt += `\n\nINSTRUCTIONS:
 You're helping the user plan their tasks. You can:
 - Suggest how to break down large tasks into subtasks
 - Recommend priorities based on due dates and dependencies
@@ -228,11 +265,8 @@ You're helping the user plan their tasks. You can:
 - Help resolve conflicts between tasks
 
 Be practical and specific. Give actionable suggestions.`;
-  }
-
-  return `${base}
-
-INSTRUCTIONS:
+  } else {
+    prompt += `\n\nINSTRUCTIONS:
 You're the user's productivity assistant. Help them with whatever they need:
 - Answer questions about their tasks and schedule
 - Help create, update, or organize tasks
@@ -241,47 +275,13 @@ You're the user's productivity assistant. Help them with whatever they need:
 - Help with time management
 
 Keep responses concise. When the user asks you to create or modify tasks, describe what you'd change and confirm before proceeding.`;
-}
-
-function buildFullPrompt(systemPrompt, messageHistory) {
-  let prompt = `SYSTEM INSTRUCTIONS:\n${systemPrompt}\n\n---\n\nCONVERSATION:\n`;
-
-  for (const msg of messageHistory) {
-    const label = msg.role === 'user' ? 'User' : 'Assistant';
-    prompt += `${label}: ${msg.content}\n\n`;
   }
 
-  prompt += 'Assistant:';
   return prompt;
 }
 
-/**
- * Parse [ACTION: {...}] blocks from Claude's response.
- * Returns { cleanMessage, actions }.
- */
-function parseActions(responseText) {
-  const actionRegex = /\[ACTION:\s*(\{[\s\S]*?\})\s*\]/g;
-  const actions = [];
-  let match;
+// --- Action execution (unchanged) ---
 
-  while ((match = actionRegex.exec(responseText)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]);
-      actions.push(parsed);
-    } catch (err) {
-      logger.warn('Failed to parse action block:', match[1], err.message);
-    }
-  }
-
-  const cleanMessage = responseText.replace(actionRegex, '').replace(/\n{3,}/g, '\n\n').trim();
-
-  return { cleanMessage, actions };
-}
-
-/**
- * Execute a single action on behalf of a user.
- * Returns { success, type, task?, error? }.
- */
 async function executeAction(action, user) {
   const { type, params } = action;
   const userId = user._id;
@@ -383,6 +383,8 @@ async function executeAction(action, user) {
   }
 }
 
+// --- Chat flow ---
+
 async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   let conversation;
   if (conversationId) {
@@ -405,9 +407,12 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   // Auto-generate title for new conversations (fire-and-forget)
   if (isNewConversation) {
     const convoId = conversation._id;
-    callClaude(`Summarize this message in 2-4 words as a conversation title. Return only the title, no quotes or punctuation.\n\nMessage: ${message}`)
-      .then(title => {
-        const cleanTitle = title.replace(/^["']|["']$/g, '').trim();
+    callClaude(
+      `Generate a 2-4 word title for this message (no quotes or punctuation):\n\n${message}`,
+      { schema: titleSchema }
+    )
+      .then(result => {
+        const cleanTitle = (result.title || '').replace(/^["']|["']$/g, '').trim();
         if (cleanTitle) {
           Conversation.findByIdAndUpdate(convoId, { title: cleanTitle }).catch(err =>
             logger.warn('Failed to save auto-generated title:', err.message)
@@ -418,32 +423,31 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   }
 
   const context = await buildUserContext(user);
-  const systemPrompt = buildSystemPrompt(conversation.type, user, context);
+  const contextPrompt = buildContextPrompt(conversation.type, user, context);
 
-  const messageHistory = conversation.messages.slice(-20).map(m => ({
-    role: m.role,
-    content: m.content,
-  }));
+  // Build conversation history as the user message
+  const history = conversation.messages.slice(-20)
+    .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
 
-  const fullPrompt = buildFullPrompt(systemPrompt, messageHistory);
-  const rawResponse = await callClaude(fullPrompt);
+  const result = await callClaude(
+    `CONVERSATION:\n${history}\n\nAssistant:`,
+    { schema: chatResponseSchema, appendSystemPrompt: contextPrompt }
+  );
 
-  const { cleanMessage, actions } = parseActions(rawResponse);
-
-  // Execute any actions Claude included
+  // Execute actions from structured response
   const actionResults = [];
-  for (const action of actions) {
-    const result = await executeAction(action, user);
-    actionResults.push(result);
+  for (const action of result.actions || []) {
+    const actionResult = await executeAction(action, user);
+    actionResults.push(actionResult);
   }
 
-  // Save the clean message (without action blocks) to conversation
-  conversation.messages.push({ role: 'assistant', content: cleanMessage });
+  conversation.messages.push({ role: 'assistant', content: result.message });
   await conversation.save();
 
   return {
     conversationId: conversation._id,
-    message: cleanMessage,
+    message: result.message,
     type: conversation.type,
     actions: actionResults.length > 0 ? actionResults : undefined,
   };
@@ -477,7 +481,6 @@ async function estimateDuration(user, taskId) {
     .lean();
 
   const context = await buildUserContext(user);
-  const systemPrompt = buildSystemPrompt('task_planning', user, context);
 
   const similarInfo = similarTasks.length
     ? similarTasks.map(t =>
@@ -485,34 +488,28 @@ async function estimateDuration(user, taskId) {
       ).join('\n')
     : 'No similar completed tasks found.';
 
-  const fullPrompt = `${systemPrompt}
+  const contextPrompt = buildContextPrompt('task_planning', user, context);
 
-Estimate how long this task will take:
+  const taskPrompt = `Estimate how long this task will take:
 Task: "${task.title}"
 Description: ${task.description || 'None'}
 Type: ${task.type}
 Tags: ${task.tags?.join(', ') || 'None'}
 
 Similar completed tasks:
-${similarInfo}
+${similarInfo}`;
 
-Respond with ONLY a JSON object: {"estimate": <minutes>, "reasoning": "<brief explanation>"}`;
+  const result = await callClaude(taskPrompt, {
+    schema: estimateSchema,
+    appendSystemPrompt: contextPrompt,
+  });
 
-  const response = await callClaude(fullPrompt);
-
-  try {
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const result = JSON.parse(jsonMatch[0]);
-      task.aiEstimatedDuration = result.estimate;
-      await task.save();
-      return result;
-    }
-  } catch (err) {
-    logger.warn('Failed to parse duration estimate:', err.message);
+  if (result.estimate != null) {
+    task.aiEstimatedDuration = result.estimate;
+    await task.save();
   }
 
-  return { estimate: null, reasoning: 'Could not generate estimate' };
+  return result;
 }
 
 async function planDay(user) {
@@ -530,6 +527,5 @@ module.exports = {
   estimateDuration,
   planDay,
   buildUserContext,
-  parseActions,
   executeAction,
 };
