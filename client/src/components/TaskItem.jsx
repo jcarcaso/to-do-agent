@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
+import { parseDateOnly } from '../utils/date';
 
 const priorityColors = {
   low: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
@@ -94,7 +95,7 @@ function TaskItem({ task, onStatusChange, onDelete, onClick, dragHandleProps, is
             )}
             {task.dueDate && (
               <span className="text-gray-500 dark:text-gray-400">
-                Due {format(new Date(task.dueDate), 'MMM d')}
+                Due {format(parseDateOnly(task.dueDate), 'MMM d')}
               </span>
             )}
             {task.estimatedDuration && (

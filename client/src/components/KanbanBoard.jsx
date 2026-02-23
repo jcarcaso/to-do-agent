@@ -1,5 +1,6 @@
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { format } from 'date-fns';
+import { parseDateOnly } from '../utils/date';
 
 const priorityColors = {
   low: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
@@ -70,7 +71,7 @@ function KanbanCard({ task, index, onClick, isBlocked }) {
             </span>
             {task.dueDate && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {format(new Date(task.dueDate), 'MMM d')}
+                {format(parseDateOnly(task.dueDate), 'MMM d')}
               </span>
             )}
             {task.estimatedDuration && (
