@@ -128,12 +128,28 @@ function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = 
 // --- Context builders (unchanged helpers) ---
 
 async function buildUserContext(user) {
+  const timeZone = user.preferences?.timezone || 'America/New_York';
+
+  // Calculate start-of-day in the user's timezone, not server UTC.
+  // Use Intl to get the user's current date and the UTC offset reliably.
   const now = new Date();
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfRange = new Date(now);
-  endOfRange.setDate(endOfRange.getDate() + 2);
-  endOfRange.setHours(23, 59, 59, 999);
+  const intlOpts = {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  };
+  const tzParts = new Intl.DateTimeFormat('en-US', { ...intlOpts, timeZone }).formatToParts(now);
+  const utcParts = new Intl.DateTimeFormat('en-US', { ...intlOpts, timeZone: 'UTC' }).formatToParts(now);
+  const get = (parts, type) => parseInt(parts.find(p => p.type === type).value);
+
+  // Offset = user's local time - UTC (e.g. -5 hours for EST)
+  const utcMs = Date.UTC(get(utcParts,'year'), get(utcParts,'month')-1, get(utcParts,'day'), get(utcParts,'hour'), get(utcParts,'minute'));
+  const tzMs = Date.UTC(get(tzParts,'year'), get(tzParts,'month')-1, get(tzParts,'day'), get(tzParts,'hour'), get(tzParts,'minute'));
+  const offsetMs = tzMs - utcMs;
+
+  // Midnight of user's today in UTC
+  const userTodayMidnightUTC = Date.UTC(get(tzParts,'year'), get(tzParts,'month')-1, get(tzParts,'day'));
+  const startOfDay = new Date(userTodayMidnightUTC - offsetMs);
+  const endOfRange = new Date(startOfDay.getTime() + 3 * 24 * 60 * 60 * 1000 - 1);
 
   const tasks = await Task.find({
     userId: user._id,
