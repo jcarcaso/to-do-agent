@@ -188,7 +188,6 @@ async function buildUserContext(user) {
     .limit(3)
     .lean();
 
-  const timeZone = user.preferences?.timezone || 'America/New_York';
   const recentSummary = recentConversations.map(c => {
     const lastMsg = c.messages[c.messages.length - 1];
     return `${c.type} (${new Date(c.createdAt).toLocaleDateString('en-US', { timeZone })}): ${lastMsg?.content?.slice(0, 100)}...`;
