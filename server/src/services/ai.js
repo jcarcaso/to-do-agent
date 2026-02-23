@@ -1,5 +1,4 @@
 const { spawn } = require('child_process');
-const path = require('path');
 const Task = require('../models/Task');
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
@@ -9,8 +8,15 @@ const { updateParentStatus } = require('./taskHelpers');
 const logger = require('../config/logger');
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
-// Project root where .claude/agents/ lives (two levels up from services/)
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');
+
+// --- Base system prompt (was in .claude/agents/task-manager.md) ---
+
+const BASE_SYSTEM_PROMPT = `You are an AI productivity assistant for a personal task management app called To-Do Agent. Be conversational, warm, but concise and actionable.
+
+When the user asks to create, update, complete, start, or delete tasks, include the appropriate actions in your response. Use task IDs from the PENDING TASKS list provided in the user message. If ambiguous, ask for clarification instead of guessing.
+
+For create_task: only "title" is required. "priority" defaults to "medium", "type" defaults to "other".
+For update_task: only include fields that should change.`;
 
 // --- JSON schemas for structured output ---
 
@@ -56,19 +62,21 @@ const estimateSchema = {
  * @param {string} userMessage - The user message / prompt to send via stdin
  * @param {object} options
  * @param {object} [options.schema] - JSON schema to enforce structured output
- * @param {string} [options.appendSystemPrompt] - Additional system prompt context
+ * @param {string} [options.systemPromptSuffix] - Additional context appended to the base system prompt
  */
-function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = {}) {
+function callClaude(userMessage, { schema = null, systemPromptSuffix = null } = {}) {
   return new Promise((resolve, reject) => {
     const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}, cwd: ${PROJECT_ROOT}`);
+    logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}`);
 
-    const args = ['-p', '--agent', 'task-manager', '--output-format', 'json'];
+    const systemPrompt = systemPromptSuffix
+      ? `${BASE_SYSTEM_PROMPT}\n\n${systemPromptSuffix}`
+      : BASE_SYSTEM_PROMPT;
+
+    const args = ['-p', '--model', 'haiku', '--output-format', 'json',
+      '--system-prompt', systemPrompt];
     if (schema) {
       args.push('--json-schema', JSON.stringify(schema));
-    }
-    if (appendSystemPrompt) {
-      args.push('--append-system-prompt', appendSystemPrompt);
     }
 
     const env = {
@@ -78,7 +86,7 @@ function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = 
     };
     delete env.CLAUDECODE;
 
-    const proc = spawn(CLAUDE_PATH, args, { cwd: PROJECT_ROOT, env, timeout: 120000 });
+    const proc = spawn(CLAUDE_PATH, args, { env, timeout: 120000 });
 
     let stdout = '';
     let stderr = '';
@@ -460,7 +468,7 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
 
   const result = await callClaude(
     `CONVERSATION:\n${history}\n\nAssistant:`,
-    { schema: chatResponseSchema, appendSystemPrompt: contextPrompt }
+    { schema: chatResponseSchema, systemPromptSuffix: contextPrompt }
   );
 
   // Execute actions from structured response
@@ -529,7 +537,7 @@ ${similarInfo}`;
 
   const result = await callClaude(taskPrompt, {
     schema: estimateSchema,
-    appendSystemPrompt: contextPrompt,
+    systemPromptSuffix: contextPrompt,
   });
 
   if (result.estimate != null) {
