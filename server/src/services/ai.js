@@ -166,20 +166,21 @@ async function buildUserContext(user) {
     .limit(3)
     .lean();
 
+  const timeZone = user.preferences?.timezone || 'America/New_York';
   const recentSummary = recentConversations.map(c => {
     const lastMsg = c.messages[c.messages.length - 1];
-    return `${c.type} (${new Date(c.createdAt).toLocaleDateString()}): ${lastMsg?.content?.slice(0, 100)}...`;
+    return `${c.type} (${new Date(c.createdAt).toLocaleDateString('en-US', { timeZone })}): ${lastMsg?.content?.slice(0, 100)}...`;
   }).join('\n');
 
   return { tasks, calendarEvents, patterns, recentSummary };
 }
 
-function formatTasks(tasks) {
+function formatTasks(tasks, timeZone) {
   if (!tasks.length) return 'No pending tasks.';
 
   return tasks.map((t, i) => {
     const parts = [`${i + 1}. [ID:${t._id}] "${t.title}" [${t.priority}]`];
-    if (t.dueDate) parts.push(`Due: ${new Date(t.dueDate).toLocaleDateString()}`);
+    if (t.dueDate) parts.push(`Due: ${new Date(t.dueDate).toLocaleDateString('en-US', { timeZone })}`);
     if (t.estimatedDuration) parts.push(`Est: ${t.estimatedDuration}min`);
     if (t.type !== 'other') parts.push(`Type: ${t.type}`);
     if (t.status === 'in_progress') parts.push('(in progress)');
@@ -187,20 +188,20 @@ function formatTasks(tasks) {
   }).join('\n');
 }
 
-function formatCalendar(events) {
+function formatCalendar(events, timeZone) {
   if (!events.length) return 'No calendar events in the next 3 days.';
 
   return events.map(e => {
     const startDt = e.start?.dateTime ? new Date(e.start.dateTime) : null;
     const endDt = e.end?.dateTime ? new Date(e.end.dateTime) : null;
     const date = startDt
-      ? startDt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+      ? startDt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone })
       : e.start?.date || '';
     const start = startDt
-      ? startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      ? startDt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone })
       : 'All day';
     const end = endDt
-      ? endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      ? endDt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone })
       : '';
     return `- ${date} ${start}${end ? ` - ${end}` : ''}: ${e.summary || '(No title)'}`;
   }).join('\n');
@@ -229,16 +230,18 @@ function formatPatterns(patterns) {
 // --- Dynamic context prompt (replaces buildSystemPrompt + buildFullPrompt) ---
 
 function buildContextPrompt(type, user, context) {
+  const timeZone = user.preferences?.timezone || 'America/New_York';
   let prompt = `USER CONTEXT:
 - Name: ${user.name}
-- Timezone: ${user.preferences?.timezone || 'America/New_York'}
-- Today: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+- Timezone: ${timeZone}
+- Today: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone })}
+- Current time: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone })}
 
 PENDING TASKS:
-${formatTasks(context.tasks)}
+${formatTasks(context.tasks, timeZone)}
 
 CALENDAR (next 3 days):
-${formatCalendar(context.calendarEvents)}
+${formatCalendar(context.calendarEvents, timeZone)}
 
 USER PATTERNS:
 ${formatPatterns(context.patterns)}

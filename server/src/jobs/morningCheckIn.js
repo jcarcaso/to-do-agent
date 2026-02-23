@@ -51,22 +51,21 @@ async function runCheckInForUser(user) {
  * Process morning check-ins for all users based on their preferred time.
  */
 async function processCheckIns() {
-  const now = new Date();
-  const currentHour = now.getHours().toString().padStart(2, '0');
-  const currentMinute = '00'; // We run on the hour
-
-  const checkInTime = `${currentHour}:${currentMinute}`;
-
-  // Find users whose check-in time matches the current hour
+  // Find all users with in-app check-ins enabled
   const users = await User.find({
-    'preferences.morningCheckInTime': checkInTime,
+    'preferences.morningCheckInTime': { $exists: true },
     'preferences.notificationChannels.inApp': true,
   });
 
-  logger.info(`Processing morning check-ins for ${users.length} users at ${checkInTime}`);
-
   for (const user of users) {
-    await runCheckInForUser(user);
+    const timeZone = user.preferences?.timezone || 'America/New_York';
+    const currentHourInUserTz = new Date().toLocaleString('en-US', { hour: '2-digit', hour12: false, timeZone }).padStart(2, '0');
+    const userCheckInTime = `${currentHourInUserTz}:00`;
+
+    if (user.preferences.morningCheckInTime === userCheckInTime) {
+      logger.info(`Morning check-in triggered for ${user.name} (${timeZone}, ${userCheckInTime})`);
+      await runCheckInForUser(user);
+    }
   }
 }
 
