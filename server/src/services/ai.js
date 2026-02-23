@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const path = require('path');
 const Task = require('../models/Task');
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
@@ -8,6 +9,8 @@ const { updateParentStatus } = require('./taskHelpers');
 const logger = require('../config/logger');
 
 const CLAUDE_PATH = process.env.CLAUDE_PATH || 'claude';
+// Project root where .claude/agents/ lives (two levels up from services/)
+const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 
 // --- JSON schemas for structured output ---
 
@@ -58,7 +61,7 @@ const estimateSchema = {
 function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = {}) {
   return new Promise((resolve, reject) => {
     const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}`);
+    logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}, cwd: ${PROJECT_ROOT}`);
 
     const args = ['-p', '--agent', 'task-manager', '--output-format', 'json'];
     if (schema) {
@@ -75,7 +78,7 @@ function callClaude(userMessage, { schema = null, appendSystemPrompt = null } = 
     };
     delete env.CLAUDECODE;
 
-    const proc = spawn(CLAUDE_PATH, args, { env, timeout: 120000 });
+    const proc = spawn(CLAUDE_PATH, args, { cwd: PROJECT_ROOT, env, timeout: 120000 });
 
     let stdout = '';
     let stderr = '';
