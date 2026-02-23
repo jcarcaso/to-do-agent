@@ -58,7 +58,10 @@ const estimateSchema = {
 // --- Core Claude CLI caller ---
 
 /**
- * Call Claude CLI as a subprocess using the task-manager agent.
+ * Call Claude CLI as a subprocess.
+ * System instructions + dynamic context are piped via stdin to avoid
+ * CLI flag issues. Structured output uses --json-schema + --output-format json.
+ *
  * @param {string} userMessage - The user message / prompt to send via stdin
  * @param {object} options
  * @param {object} [options.schema] - JSON schema to enforce structured output
@@ -69,12 +72,7 @@ function callClaude(userMessage, { schema = null, systemPromptSuffix = null } = 
     const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     logger.info(`Claude CLI call - token set: ${!!token}, token length: ${token?.length || 0}`);
 
-    const systemPrompt = systemPromptSuffix
-      ? `${BASE_SYSTEM_PROMPT}\n\n${systemPromptSuffix}`
-      : BASE_SYSTEM_PROMPT;
-
-    const args = ['-p', '--model', 'haiku', '--output-format', 'json',
-      '--system-prompt', systemPrompt];
+    const args = ['-p', '--model', 'haiku', '--output-format', 'json'];
     if (schema) {
       args.push('--json-schema', JSON.stringify(schema));
     }
@@ -102,7 +100,6 @@ function callClaude(userMessage, { schema = null, systemPromptSuffix = null } = 
         try {
           const outer = JSON.parse(stdout);
           if (schema) {
-            // --json-schema puts the validated object in structured_output
             if (outer.structured_output) {
               resolve(outer.structured_output);
             } else {
@@ -128,7 +125,13 @@ function callClaude(userMessage, { schema = null, systemPromptSuffix = null } = 
       reject(new Error('Failed to get response from Claude'));
     });
 
-    proc.stdin.write(userMessage);
+    // Pipe everything via stdin: system instructions + dynamic context + user message
+    const systemPrompt = systemPromptSuffix
+      ? `${BASE_SYSTEM_PROMPT}\n\n${systemPromptSuffix}`
+      : BASE_SYSTEM_PROMPT;
+
+    const fullPrompt = `SYSTEM INSTRUCTIONS:\n${systemPrompt}\n\n---\n\n${userMessage}`;
+    proc.stdin.write(fullPrompt);
     proc.stdin.end();
   });
 }
