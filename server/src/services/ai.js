@@ -450,6 +450,10 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   const context = await buildUserContext(user);
   const contextPrompt = buildContextPrompt(conversation.type, user, context);
 
+  // Debug: log the date/time the AI will see
+  const tz = user.preferences?.timezone || 'America/New_York';
+  logger.info(`AI context date - Today: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz })}, Time: ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: tz })}, TZ: ${tz}`);
+
   // Build conversation history as the user message
   const history = conversation.messages.slice(-20)
     .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
