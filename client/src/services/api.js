@@ -32,6 +32,7 @@ export const taskApi = {
   addSubtask: (id, data) =>
     request(`/tasks/${id}/subtasks`, { method: 'POST', body: JSON.stringify(data) }),
   getDependencies: (id) => request(`/tasks/${id}/dependencies`),
+  reorder: (tasks) => request('/tasks/reorder', { method: 'PUT', body: JSON.stringify({ tasks }) }),
 };
 
 export const aiApi = {
@@ -48,9 +49,16 @@ export const aiApi = {
     return request(`/ai/conversations${query ? `?${query}` : ''}`);
   },
   getConversation: (id) => request(`/ai/conversations/${id}`),
+  updateConversation: (id, data) =>
+    request(`/ai/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 export const authApi = {
   me: () => request('/auth/me'),
   logout: () => request('/auth/logout', { method: 'POST' }),
+};
+
+export const userApi = {
+  getPreferences: () => request('/user/preferences'),
+  updatePreferences: (data) => request('/user/preferences', { method: 'PUT', body: JSON.stringify(data) }),
 };

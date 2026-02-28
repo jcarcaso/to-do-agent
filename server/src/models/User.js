@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema({
       sms: { type: Boolean, default: false },
     },
     phoneNumber: String,
+    theme: { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
   },
   googleCalendarTokens: {
     accessToken: String,

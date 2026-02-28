@@ -1,17 +1,15 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const cookieParser = require('cookie-parser');
+const validateEnv = require('./config/validateEnv');
+validateEnv();
+
 const mongoose = require('mongoose');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const passport = require('./config/passport');
 const logger = require('./config/logger');
+const app = require('./app');
 
-const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -19,28 +17,6 @@ const io = new Server(httpServer, {
     credentials: true,
   },
 });
-
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
-  credentials: true,
-}));
-app.use(express.json());
-app.use(cookieParser());
-app.use(passport.initialize());
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Routes
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/tasks', require('./routes/tasks'));
-app.use('/api/calendar', require('./routes/calendar'));
-app.use('/api/ai', require('./routes/ai'));
-// app.use('/api/user', require('./routes/user'));
 
 // Socket.io connection with user tracking for notifications
 const { setIo, registerUserSocket, unregisterUserSocket } = require('./jobs/morningCheckIn');
@@ -82,8 +58,8 @@ mongoose.connect(MONGODB_URI)
 
 // Start server
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  logger.info(`Server running on 0.0.0.0:${PORT}`);
 });
 
 module.exports = { app, io };

@@ -1289,9 +1289,10 @@ tail -f /var/log/backup.log
 
 ---
 
-## Current Implementation Status (as of 2026-02-15)
+## Current Implementation Status (as of 2026-02-22)
 
-**Git:** Initial commit `8704d10` on `main` branch. Working tree clean.
+**Git:** Repo at `github.com/jcarcaso/to-do-agent`, `main` branch. CI/CD auto-deploys to EC2.
+**Live URL:** `https://todo.drinkingwithskeletons.com`
 
 ### Phase 1: Foundation & Infrastructure — COMPLETE
 
@@ -1327,7 +1328,10 @@ tail -f /var/log/backup.log
 ### Phase 3: AI Agent Integration — COMPLETE
 
 **What was built:**
-- AI service (`server/src/services/ai.js`) — uses Claude CLI (`claude -p`) as subprocess, piping prompts via stdin
+- AI service (`server/src/services/ai.js`) — uses Claude CLI as subprocess via `--agent` and `--json-schema` flags
+  - **Agent definition** (`.claude/agents/task-manager.md`) — version-controlled base system prompt, model (`haiku`), and tool config
+  - **Structured output** — JSON schemas (`chatResponseSchema`, `titleSchema`, `estimateSchema`) enforce response shape via `--json-schema`, replacing fragile `[ACTION: {...}]` regex parsing
+  - **Dynamic context** — `buildContextPrompt()` appends user tasks, calendar, patterns, and type-specific instructions via `--append-system-prompt`
   - **Auth:** Uses `CLAUDE_CODE_OAUTH_TOKEN` env var (from `claude setup-token`) — no separate API billing
   - **Important:** `ANTHROPIC_API_KEY` in `.env` must be set to placeholder value (or removed) — if present with a real key, Claude CLI will try to use it and fail
 - Context builder — aggregates pending tasks, calendar events, user patterns, recent conversations
@@ -1340,20 +1344,87 @@ tail -f /var/log/backup.log
 - Frontend chat page (`client/src/pages/ChatPage.jsx`) — message bubbles, "Morning Check-in" and "Plan My Day" buttons, conversation continuity
 
 **What was skipped/deferred:**
-- AI tool use / function calling (AI cannot create/modify tasks from chat yet — added to Phase 6+)
 - Email (SendGrid) and SMS (Twilio) channels
 - Socket.io real-time chat streaming (currently uses request/response)
 
-### Phase 4: Progressive Web App & Polish — NOT STARTED
+### Phase 4: Progressive Web App & Polish — COMPLETE
 
-Next phase to implement. Includes:
-- PWA manifest + service worker (offline support)
-- Mobile-responsive design
-- User settings page
-- Notifications
-- Performance optimization
+**What was built:**
+- Mobile-responsive design — bottom nav for mobile, responsive grids, touch-friendly targets, safe-area handling
+- Navigation fix — replaced `<a href>` with React Router `<NavLink>` (no more full page reloads)
+- User settings page (`/settings`) — morning check-in time, timezone, notifications, phone number, theme selector
+- User preferences API (`server/src/routes/user.js`) — GET/PUT `/api/user/preferences`
+- Dark mode — `ThemeContext`, Tailwind `darkMode: 'class'`, `dark:` variants on all components, persisted to localStorage + server
+- PWA — `manifest.json`, `favicon.svg`, `vite-plugin-pwa` with NetworkFirst caching for API routes, service worker auto-update
+- Offline support — `OfflineIndicator` banner, React Query `networkMode: 'offlineFirst'`
+- Error boundary — catches render errors with friendly reload UI
+- Toast notifications — `ToastProvider` + `useToast()` hook, auto-dismiss, used on task delete/update and settings save
+- Code splitting — `React.lazy` + `Suspense` for all page components
+- Loading skeletons — pulse animation placeholders for task list and page loads
+- Empty state improvements — icons + CTAs on TasksPage, quick-action suggestion buttons on ChatPage
+- Keyboard shortcuts — `n` (new task), `/` (chat), `Escape` (close/blur)
+- Task editing — clicking a task opens pre-populated edit form inline
 
-### Phase 5: Backups, Monitoring & Launch — NOT STARTED
+**What was skipped/deferred:**
+- Push notifications (browser Notification API)
+- Swipe gestures
+- Virtual scrolling for long task lists
+
+### Phase 5: Backups, Monitoring & Launch — IN PROGRESS
+
+**What was built:**
+- Security hardening: Helmet CSP (custom directives, `useDefaults: false` for HTTP compatibility), express-mongo-sanitize, rate limiting (global, auth, AI), CORS whitelist
+- Environment variable validation (`server/src/config/validateEnv.js`)
+- Logging with Winston (console + daily rotation)
+- Unit tests with Jest + Supertest + mongodb-memory-server
+
+**What was skipped/deferred:**
+- Automated S3 backups
+- CloudWatch monitoring
+- E2E tests
+- Documentation (README, API docs)
+
+### Phase 6: Deployment & CI/CD — COMPLETE (as of 2026-02-18)
+
+**What was built:**
+- **GitHub repo:** `github.com/jcarcaso/to-do-agent` on `main` branch
+- **GitHub Actions CI/CD** (`.github/workflows/deploy.yml`):
+  - **test** job: runs server tests (with MongoDB service container) + client build
+  - **deploy** job: SSHs into EC2 via `appleboy/ssh-action`, pulls code, writes `.env` from secrets, runs deploy script
+  - Triggers on every push to `main`
+- **EC2 deployment** (Ubuntu, non-Docker):
+  - Node.js 24 via nvm, PM2 process manager
+  - Express serves both API and React static build from single process (`server/src/app.js`)
+  - Apache reverse proxy with SSL termination (existing server at `drinkingwithskeletons.com`)
+  - Subdomain: `todo.drinkingwithskeletons.com` → Apache vhost → `localhost:5000`
+  - Let's Encrypt SSL via Certbot + Apache plugin
+  - Deploy script (`deploy.sh`): git pull, client build, server install, PM2 restart, health check
+- **Helmet configured for production HTTP/HTTPS:**
+  - `useDefaults: false` with explicit CSP directives (no `upgrade-insecure-requests`)
+  - HSTS and COOP disabled until HTTPS-only is enforced
+  - `crossOriginResourcePolicy: cross-origin` for asset loading
+- **VitePWA fix:** `navigateFallbackDenylist: [/^\/api\//]` to prevent service worker from intercepting API routes (OAuth redirect, etc.)
+- **GitHub Secrets** required: `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `ENV_FILE`
+
+**Architecture (actual, replaces Docker/Nginx plan):**
+```
+Browser → https://todo.drinkingwithskeletons.com
+    → Apache (SSL termination, reverse proxy)
+        → localhost:5000 (Express + PM2)
+            → API routes (/api/*)
+            → Static React build (client/dist)
+            → SPA catch-all (index.html)
+        → MongoDB Atlas
+        → Claude API
+        → Google OAuth / Calendar API
+```
+
+**EC2 one-time setup performed:**
+- Node.js 24 via nvm, PM2 globally installed
+- Apache vhost for `todo.drinkingwithskeletons.com` with proxy + WebSocket support
+- Let's Encrypt cert via `certbot --apache`
+- PM2 startup + save for reboot persistence
+- Security group: ports 22, 80, 443, 5000 open
 
 ### Key Files Reference
 
@@ -1362,20 +1433,27 @@ to-do-agent/
 ├── .env                            # Local config (NOT committed) — see .env.example
 ├── .env.example                    # Template with all required variables
 ├── .gitignore
+├── .claude/agents/task-manager.md # AI agent definition (system prompt, model, tools)
 ├── project-plan.md                 # This file
-├── docker-compose.yml              # Production
-├── docker-compose.dev.yml          # Development
+├── deploy.sh                       # EC2 deployment script (git pull, build, pm2 restart)
+├── .github/workflows/deploy.yml   # CI/CD: test + deploy to EC2 on push to main
+├── docker-compose.yml              # Production (legacy — not used, using PM2 instead)
+├── docker-compose.dev.yml          # Development (legacy — not used)
 ├── client/
 │   ├── src/
 │   │   ├── main.jsx                # Entry: React Query + Router + AuthProvider
 │   │   ├── App.jsx                 # Shell layout, routing, auth gating
 │   │   ├── context/AuthContext.jsx # Auth state, login/logout
-│   │   ├── services/api.js         # API client (tasks, AI, auth)
+│   │   ├── context/ThemeContext.jsx # Dark mode state + localStorage
+│   │   ├── services/api.js         # API client (tasks, AI, auth, user)
 │   │   ├── hooks/useTasks.js       # React Query hooks for task CRUD
-│   │   ├── pages/TasksPage.jsx     # Task list with filters
+│   │   ├── hooks/useKeyboardShortcuts.js # Global keyboard shortcuts
+│   │   ├── pages/TasksPage.jsx     # Task list with filters + inline edit
 │   │   ├── pages/ChatPage.jsx      # AI chat interface
-│   │   └── components/             # Header, Sidebar, TaskForm, TaskItem
-│   └── vite.config.js              # Dev proxy: /api → 127.0.0.1:5000
+│   │   ├── pages/SettingsPage.jsx  # User preferences
+│   │   └── components/             # Header, Sidebar, BottomNav, TaskForm, TaskItem,
+│   │                               # ErrorBoundary, Toast, LoadingSkeleton, OfflineIndicator
+│   └── vite.config.js              # Dev proxy + vite-plugin-pwa
 ├── server/
 │   ├── src/
 │   │   ├── index.js                # Express + Socket.io + MongoDB + cron jobs
@@ -1383,8 +1461,8 @@ to-do-agent/
 │   │   ├── config/logger.js        # Winston
 │   │   ├── middleware/auth.js      # JWT auth middleware
 │   │   ├── models/                 # User, Task, Conversation, UserPattern
-│   │   ├── routes/                 # auth, tasks, calendar, ai
-│   │   ├── services/ai.js          # Claude CLI subprocess + prompt building
+│   │   ├── routes/                 # auth, tasks, calendar, ai, user
+│   │   ├── services/ai.js          # Claude CLI subprocess via --agent + --json-schema
 │   │   ├── services/calendar.js    # Google Calendar (with safety guards)
 │   │   └── jobs/                   # recurringTasks, morningCheckIn, patternLearning
 │   └── package.json
@@ -1421,5 +1499,8 @@ This project plan provides a comprehensive roadmap to build your AI-powered pers
 - Reliable (automated backups, monitoring)
 
 **Next Steps:**
-1. Phase 4: PWA setup, mobile-responsive design, user settings, notifications
-2. Phase 5: Backups, monitoring, security hardening, testing, documentation
+1. Complete Phase 5: automated S3 backups, CloudWatch monitoring, E2E tests, documentation
+2. Re-enable HSTS and COOP helmet headers now that HTTPS is live
+3. Verify Google OAuth works end-to-end on production
+4. Consider removing Docker configs (docker-compose.yml, Dockerfiles) since deployment uses PM2 directly
+5. Revisit Claude CLI `--agent` configuration to reduce per-prompt token usage — test whether the agent definition (`.claude/agents/task-manager.md`) can offload the base system prompt so only dynamic context (tasks, calendar, conversation history) is sent via stdin. Current approach sends the full system prompt + context on every message, including follow-ups in the same conversation.

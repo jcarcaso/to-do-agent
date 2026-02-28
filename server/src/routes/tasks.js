@@ -2,11 +2,34 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Task = require('../models/Task');
 const auth = require('../middleware/auth');
+const { updateParentStatus, buildDependencyTree } = require('../services/taskHelpers');
 
 const router = express.Router();
 
 // All task routes require authentication
 router.use(auth);
+
+// PUT /api/tasks/reorder - Bulk reorder tasks
+router.put('/reorder', async (req, res) => {
+  try {
+    const { tasks } = req.body;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      return res.status(400).json({ error: 'tasks array is required' });
+    }
+
+    const operations = tasks.map(({ id, sortOrder, status }) => ({
+      updateOne: {
+        filter: { _id: new mongoose.Types.ObjectId(id), userId: req.user._id },
+        update: { $set: { sortOrder, ...(status ? { status } : {}) } },
+      },
+    }));
+
+    await Task.bulkWrite(operations);
+    res.json({ message: 'Tasks reordered' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/tasks - Create task
 router.post('/', async (req, res) => {
@@ -39,7 +62,7 @@ router.get('/', async (req, res) => {
       search,
       dueBefore,
       dueAfter,
-      sort = '-createdAt',
+      sort = 'sortOrder -createdAt',
       page = 1,
       limit = 50,
       parentOnly,
@@ -47,13 +70,18 @@ router.get('/', async (req, res) => {
 
     const filter = { userId: req.user._id };
 
-    if (status) filter.status = status;
+    if (status) {
+      filter.status = status;
+    } else {
+      filter.status = { $ne: 'archived' };
+    }
     if (type) filter.type = type;
     if (priority) filter.priority = priority;
     if (search) {
       filter.$or = [
         { title: { $regex: search, $options: 'i' } },
         { description: { $regex: search, $options: 'i' } },
+        { tags: { $in: [new RegExp(search, 'i')] } },
       ];
     }
     if (dueBefore || dueAfter) {
@@ -73,6 +101,7 @@ router.get('/', async (req, res) => {
         .skip(skip)
         .limit(parseInt(limit))
         .populate('subtasks', 'title status priority')
+        .populate('dependencies', 'title status')
         .lean(),
       Task.countDocuments(filter),
     ]);
@@ -306,51 +335,5 @@ router.get('/:id/dependencies', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// Helper: update parent task status based on subtask states
-async function updateParentStatus(parentId, userId) {
-  const parent = await Task.findOne({ _id: parentId, userId });
-  if (!parent || parent.subtasks.length === 0) return;
-
-  const subtasks = await Task.find({ _id: { $in: parent.subtasks } });
-  const allCompleted = subtasks.every(s => s.status === 'completed');
-  const anyInProgress = subtasks.some(s => s.status === 'in_progress');
-
-  if (allCompleted) {
-    parent.status = 'completed';
-    parent.completedAt = new Date();
-    parent.completedDuringHour = new Date().getHours();
-  } else if (anyInProgress) {
-    parent.status = 'in_progress';
-  }
-
-  await parent.save();
-}
-
-// Helper: build dependency tree (with circular detection)
-async function buildDependencyTree(taskId, userId, visited = new Set()) {
-  if (visited.has(taskId.toString())) {
-    return { circular: true };
-  }
-  visited.add(taskId.toString());
-
-  const task = await Task.findOne({ _id: taskId, userId })
-    .populate('dependencies', 'title status');
-
-  if (!task || task.dependencies.length === 0) return [];
-
-  const tree = [];
-  for (const dep of task.dependencies) {
-    const children = await buildDependencyTree(dep._id, userId, new Set(visited));
-    tree.push({
-      id: dep._id,
-      title: dep.title,
-      status: dep.status,
-      dependencies: children,
-    });
-  }
-
-  return tree;
-}
 
 module.exports = router;
