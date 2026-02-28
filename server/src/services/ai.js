@@ -21,6 +21,8 @@ ACTION PARAMETER FORMATS:
 - complete_task: { "taskId": "<ID from PENDING TASKS>" }
 - start_task: { "taskId": "<ID from PENDING TASKS>" }
 - delete_task: { "taskId": "<ID from PENDING TASKS>" }
+- schedule_task: { "taskId": "<ID from PENDING TASKS>", "startTime": "YYYY-MM-DDTHH:MM", "endTime": "YYYY-MM-DDTHH:MM" }. Blocks time on the user's Google Calendar. If already scheduled, updates the existing event.
+- unschedule_task: { "taskId": "<ID from PENDING TASKS>" }. Removes the task's calendar event.
 
 IMPORTANT: The taskId must be the exact ID shown in brackets [ID:...] in the PENDING TASKS list.`;
 
@@ -36,7 +38,7 @@ const chatResponseSchema = {
       items: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['create_task', 'update_task', 'complete_task', 'start_task', 'delete_task'] },
+          type: { type: 'string', enum: ['create_task', 'update_task', 'complete_task', 'start_task', 'delete_task', 'schedule_task', 'unschedule_task'] },
           params: { type: 'object', description: 'Action parameters.' }
         },
         required: ['type', 'params']
@@ -413,6 +415,58 @@ async function executeAction(action, user) {
         );
         if (!task) return { success: false, type: 'start_task', error: 'Task not found' };
         return { success: true, type: 'start_task', task };
+      }
+
+      case 'schedule_task': {
+        if (!user.googleCalendarTokens?.accessToken) {
+          return { success: false, type: 'schedule_task', error: 'No Google Calendar connected' };
+        }
+
+        const task = await Task.findOne({ _id: params.taskId, userId });
+        if (!task) return { success: false, type: 'schedule_task', error: 'Task not found' };
+
+        let event;
+        if (task.googleCalendarEventId) {
+          event = await calendarService.updateEvent(user, task.googleCalendarEventId, {
+            title: task.title,
+            description: task.description,
+            startTime: params.startTime,
+            endTime: params.endTime,
+          });
+        } else {
+          event = await calendarService.createEvent(user, {
+            title: task.title,
+            description: task.description,
+            startTime: params.startTime,
+            endTime: params.endTime,
+            taskId: task._id,
+          });
+          task.googleCalendarEventId = event.id;
+        }
+
+        task.scheduledStart = new Date(params.startTime);
+        task.scheduledEnd = new Date(params.endTime);
+        await task.save();
+
+        return { success: true, type: 'schedule_task', task, event };
+      }
+
+      case 'unschedule_task': {
+        const task = await Task.findOne({ _id: params.taskId, userId });
+        if (!task) return { success: false, type: 'unschedule_task', error: 'Task not found' };
+
+        if (!task.googleCalendarEventId) {
+          return { success: false, type: 'unschedule_task', error: 'Task is not scheduled on calendar' };
+        }
+
+        await calendarService.deleteEvent(user, task.googleCalendarEventId);
+
+        task.googleCalendarEventId = undefined;
+        task.scheduledStart = undefined;
+        task.scheduledEnd = undefined;
+        await task.save();
+
+        return { success: true, type: 'unschedule_task', task };
       }
 
       default:
