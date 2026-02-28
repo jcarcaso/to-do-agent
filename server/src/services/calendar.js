@@ -53,22 +53,51 @@ async function getEvents(user, timeMin, timeMax) {
 }
 
 /**
+ * Interpret a datetime string as being in the given IANA timezone.
+ * Naive strings like "2026-02-28T19:00" are otherwise parsed as UTC by
+ * `new Date()`, which shifts the event by the UTC offset.
+ */
+function toISOInTimezone(dateTimeStr, timeZone) {
+  const d = new Date(dateTimeStr);
+  // If the string already has timezone info (Z, +XX:XX), use it as-is
+  if (/[Zz]|[+-]\d{2}:\d{2}$/.test(dateTimeStr)) {
+    return d.toISOString();
+  }
+  // Naive string — interpret as local time in the user's timezone.
+  // Get what UTC time corresponds to this wall-clock time in the given tz.
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+  // Find the offset: format `d` (treated as UTC) in the target tz, then compute the diff
+  const utcMs = d.getTime();
+  const parts = formatter.formatToParts(new Date(utcMs));
+  const get = (type) => parseInt(parts.find(p => p.type === type).value);
+  const tzMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  const offsetMs = tzMs - utcMs;
+  // The real UTC time = naive time (parsed as UTC) minus the offset
+  return new Date(utcMs - offsetMs).toISOString();
+}
+
+/**
  * Create a calendar event for a task.
  * Tags the event with extendedProperties so we can identify it as ours.
  */
 async function createEvent(user, { title, description, startTime, endTime, taskId }) {
   const calendar = await getCalendarClient(user);
+  const tz = user.preferences?.timezone || 'America/New_York';
 
   const event = {
     summary: title,
     description: description || '',
     start: {
-      dateTime: new Date(startTime).toISOString(),
-      timeZone: user.preferences?.timezone || 'America/New_York',
+      dateTime: toISOInTimezone(startTime, tz),
+      timeZone: tz,
     },
     end: {
-      dateTime: new Date(endTime).toISOString(),
-      timeZone: user.preferences?.timezone || 'America/New_York',
+      dateTime: toISOInTimezone(endTime, tz),
+      timeZone: tz,
     },
     // SAFETY: Tag this event as created by our app
     extendedProperties: {
@@ -110,8 +139,8 @@ async function updateEvent(user, eventId, updates) {
   if (updates.description !== undefined) patch.description = updates.description;
   if (updates.startTime && updates.endTime) {
     const tz = user.preferences?.timezone || 'America/New_York';
-    patch.start = { dateTime: new Date(updates.startTime).toISOString(), timeZone: tz };
-    patch.end = { dateTime: new Date(updates.endTime).toISOString(), timeZone: tz };
+    patch.start = { dateTime: toISOInTimezone(updates.startTime, tz), timeZone: tz };
+    patch.end = { dateTime: toISOInTimezone(updates.endTime, tz), timeZone: tz };
   }
 
   const res = await calendar.events.patch({
