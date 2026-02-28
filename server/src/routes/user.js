@@ -18,7 +18,7 @@ router.get('/preferences', async (req, res) => {
 // PUT /api/user/preferences
 router.put('/preferences', async (req, res) => {
   try {
-    const { morningCheckInTime, timezone, notificationChannels, phoneNumber, theme } = req.body;
+    const { morningCheckInTime, timezone, notificationChannels, phoneNumber, theme, archiveAfterDays, purgeAfterDays } = req.body;
 
     const updates = {};
 
@@ -57,6 +57,22 @@ router.put('/preferences', async (req, res) => {
         return res.status(400).json({ error: 'theme must be light, dark, or system' });
       }
       updates['preferences.theme'] = theme;
+    }
+
+    if (archiveAfterDays !== undefined) {
+      const val = Number(archiveAfterDays);
+      if (!Number.isInteger(val) || val < 1 || val > 365) {
+        return res.status(400).json({ error: 'archiveAfterDays must be an integer between 1 and 365' });
+      }
+      updates['preferences.archiveAfterDays'] = val;
+    }
+
+    if (purgeAfterDays !== undefined) {
+      const val = Number(purgeAfterDays);
+      if (!Number.isInteger(val) || val < 7 || val > 365) {
+        return res.status(400).json({ error: 'purgeAfterDays must be an integer between 7 and 365' });
+      }
+      updates['preferences.purgeAfterDays'] = val;
     }
 
     const user = await User.findByIdAndUpdate(

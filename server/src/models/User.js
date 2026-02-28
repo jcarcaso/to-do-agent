@@ -26,6 +26,8 @@ const userSchema = new mongoose.Schema({
     },
     phoneNumber: String,
     theme: { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
+    archiveAfterDays: { type: Number, default: 2, min: 1, max: 365 },
+    purgeAfterDays: { type: Number, default: 90, min: 7, max: 365 },
   },
   googleCalendarTokens: {
     accessToken: String,

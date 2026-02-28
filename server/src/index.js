@@ -53,6 +53,9 @@ mongoose.connect(MONGODB_URI)
 
     const { startPatternLearningJob } = require('./jobs/patternLearning');
     startPatternLearningJob();
+
+    const { startTaskCleanupJob } = require('./jobs/taskCleanup');
+    startTaskCleanupJob();
   })
   .catch((err) => logger.error('MongoDB connection error:', err));
 

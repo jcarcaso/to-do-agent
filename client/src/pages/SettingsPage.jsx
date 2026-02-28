@@ -141,6 +141,41 @@ function SettingsPage() {
         )}
       </div>
 
+      {/* Task Cleanup */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Task Cleanup</h3>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Archive completed tasks after</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={prefs.archiveAfterDays ?? 2}
+                onChange={(e) => save({ archiveAfterDays: parseInt(e.target.value, 10) })}
+                className={inputClass + ' max-w-[100px]'}
+              />
+              <span className="text-gray-700 dark:text-gray-300">days</span>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Permanently delete archived tasks after</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={7}
+                max={365}
+                value={prefs.purgeAfterDays ?? 90}
+                onChange={(e) => save({ purgeAfterDays: parseInt(e.target.value, 10) })}
+                className={inputClass + ' max-w-[100px]'}
+              />
+              <span className="text-gray-700 dark:text-gray-300">days</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Theme */}
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
         <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Theme</h3>
