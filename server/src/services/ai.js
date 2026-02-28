@@ -163,15 +163,19 @@ You can perform task actions by including action blocks in your response. Use th
 [ACTION: {"type": "complete_task", "params": {"taskId": "..."}}]
 [ACTION: {"type": "delete_task", "params": {"taskId": "..."}}]
 [ACTION: {"type": "start_task", "params": {"taskId": "..."}}]
+[ACTION: {"type": "schedule_task", "params": {"taskId": "...", "startTime": "YYYY-MM-DDTHH:MM", "endTime": "YYYY-MM-DDTHH:MM"}}]
+[ACTION: {"type": "unschedule_task", "params": {"taskId": "..."}}]
 
 RULES FOR ACTIONS:
-- Only perform actions when the user explicitly asks you to create, update, complete, delete, or start a task.
+- Only perform actions when the user explicitly asks you to create, update, complete, delete, start, schedule, or unschedule a task.
 - Always confirm what you're doing in your text response.
 - Use task IDs from the PENDING TASKS list above.
 - If the user's request is ambiguous, ask for clarification instead of guessing.
 - You may include multiple actions in one response.
 - For create_task: "priority" defaults to "medium", "type" defaults to "other". Only "title" is required.
 - For update_task: only include fields that should change.
+- For schedule_task: blocks time on the user's Google Calendar. If already scheduled, updates the existing event.
+- For unschedule_task: removes the task's calendar event.
 
 USER CONTEXT:
 - Name: ${user.name}
@@ -346,6 +350,58 @@ async function executeAction(action, user) {
         );
         if (!task) return { success: false, type: 'start_task', error: 'Task not found' };
         return { success: true, type: 'start_task', task };
+      }
+
+      case 'schedule_task': {
+        if (!user.googleCalendarTokens?.accessToken) {
+          return { success: false, type: 'schedule_task', error: 'No Google Calendar connected' };
+        }
+
+        const task = await Task.findOne({ _id: params.taskId, userId });
+        if (!task) return { success: false, type: 'schedule_task', error: 'Task not found' };
+
+        let event;
+        if (task.googleCalendarEventId) {
+          event = await calendarService.updateEvent(user, task.googleCalendarEventId, {
+            title: task.title,
+            description: task.description,
+            startTime: params.startTime,
+            endTime: params.endTime,
+          });
+        } else {
+          event = await calendarService.createEvent(user, {
+            title: task.title,
+            description: task.description,
+            startTime: params.startTime,
+            endTime: params.endTime,
+            taskId: task._id,
+          });
+          task.googleCalendarEventId = event.id;
+        }
+
+        task.scheduledStart = new Date(params.startTime);
+        task.scheduledEnd = new Date(params.endTime);
+        await task.save();
+
+        return { success: true, type: 'schedule_task', task, event };
+      }
+
+      case 'unschedule_task': {
+        const task = await Task.findOne({ _id: params.taskId, userId });
+        if (!task) return { success: false, type: 'unschedule_task', error: 'Task not found' };
+
+        if (!task.googleCalendarEventId) {
+          return { success: false, type: 'unschedule_task', error: 'Task is not scheduled on calendar' };
+        }
+
+        await calendarService.deleteEvent(user, task.googleCalendarEventId);
+
+        task.googleCalendarEventId = undefined;
+        task.scheduledStart = undefined;
+        task.scheduledEnd = undefined;
+        await task.save();
+
+        return { success: true, type: 'unschedule_task', task };
       }
 
       default:
