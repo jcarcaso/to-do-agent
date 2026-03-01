@@ -1,6 +1,8 @@
 const express = require('express');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const smsService = require('../services/sms');
+const logger = require('../config/logger');
 
 const router = express.Router();
 
@@ -75,11 +77,24 @@ router.put('/preferences', async (req, res) => {
       updates['preferences.purgeAfterDays'] = val;
     }
 
+    const previousSms = req.user.preferences?.notificationChannels?.sms;
+    const previousPhone = req.user.preferences?.phoneNumber;
+
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updates },
       { new: true, runValidators: true }
     );
+
+    // Send test SMS when user newly enables SMS with a phone number
+    const nowSms = user.preferences?.notificationChannels?.sms;
+    const nowPhone = user.preferences?.phoneNumber;
+    const smsJustEnabled = nowSms && nowPhone && (!previousSms || !previousPhone || nowPhone !== previousPhone);
+
+    if (smsJustEnabled && smsService.isConfigured()) {
+      smsService.sendSms(nowPhone, 'Hello, this is your personal To-Do Agent. Let me know if you need anything!')
+        .catch(err => logger.error(`Test SMS failed for ${user.name}:`, err.message));
+    }
 
     res.json(user.preferences);
   } catch (err) {
