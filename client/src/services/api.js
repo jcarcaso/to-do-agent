@@ -61,4 +61,5 @@ export const authApi = {
 export const userApi = {
   getPreferences: () => request('/user/preferences'),
   updatePreferences: (data) => request('/user/preferences', { method: 'PUT', body: JSON.stringify(data) }),
+  verifySms: () => request('/user/verify-sms', { method: 'POST' }),
 };

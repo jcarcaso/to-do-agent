@@ -77,28 +77,34 @@ router.put('/preferences', async (req, res) => {
       updates['preferences.purgeAfterDays'] = val;
     }
 
-    const previousSms = req.user.preferences?.notificationChannels?.sms;
-    const previousPhone = req.user.preferences?.phoneNumber;
-
     const user = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updates },
       { new: true, runValidators: true }
     );
 
-    // Send test SMS when user newly enables SMS with a phone number
-    const nowSms = user.preferences?.notificationChannels?.sms;
-    const nowPhone = user.preferences?.phoneNumber;
-    const smsJustEnabled = nowSms && nowPhone && (!previousSms || !previousPhone || nowPhone !== previousPhone);
-
-    if (smsJustEnabled && smsService.isConfigured()) {
-      smsService.sendSms(nowPhone, 'Hello, this is your personal To-Do Agent. Let me know if you need anything!')
-        .catch(err => logger.error(`Test SMS failed for ${user.name}:`, err.message));
-    }
-
     res.json(user.preferences);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/user/verify-sms
+router.post('/verify-sms', async (req, res) => {
+  try {
+    const phone = req.user.preferences?.phoneNumber;
+    if (!phone) {
+      return res.status(400).json({ error: 'No phone number configured' });
+    }
+    if (!smsService.isConfigured()) {
+      return res.status(503).json({ error: 'SMS is not configured on this server' });
+    }
+
+    await smsService.sendSms(phone, 'Hello, this is your personal To-Do Agent. Let me know if you need anything!');
+    res.json({ success: true });
+  } catch (err) {
+    logger.error(`Verify SMS failed for ${req.user.name}:`, err.message);
+    res.status(500).json({ error: 'Failed to send verification SMS' });
   }
 });
 

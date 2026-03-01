@@ -27,6 +27,7 @@ function SettingsPage() {
   const { addToast } = useToast();
   const [prefs, setPrefs] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     userApi.getPreferences().then(setPrefs).catch(() => {});
@@ -129,14 +130,33 @@ function SettingsPage() {
         {prefs.notificationChannels?.sms && (
           <div className="mt-4">
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Phone number</label>
-            <input
-              type="tel"
-              value={prefs.phoneNumber || ''}
-              onChange={(e) => setPrefs({ ...prefs, phoneNumber: e.target.value })}
-              onBlur={(e) => save({ phoneNumber: e.target.value })}
-              placeholder="+1 (555) 123-4567"
-              className={inputClass + ' max-w-xs'}
-            />
+            <div className="flex items-center gap-2 max-w-xs">
+              <input
+                type="tel"
+                value={prefs.phoneNumber || ''}
+                onChange={(e) => setPrefs({ ...prefs, phoneNumber: e.target.value })}
+                onBlur={(e) => save({ phoneNumber: e.target.value })}
+                placeholder="+1 (555) 123-4567"
+                className={inputClass}
+              />
+              <button
+                onClick={async () => {
+                  setVerifying(true);
+                  try {
+                    await userApi.verifySms();
+                    addToast('Verification SMS sent!', 'success');
+                  } catch (err) {
+                    addToast(`Failed: ${err.message}`, 'error');
+                  } finally {
+                    setVerifying(false);
+                  }
+                }}
+                disabled={!prefs.phoneNumber || verifying}
+                className="px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                {verifying ? 'Sending...' : 'Verify'}
+              </button>
+            </div>
           </div>
         )}
       </div>
