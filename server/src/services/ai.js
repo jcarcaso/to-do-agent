@@ -269,7 +269,7 @@ function formatPatterns(patterns) {
 
 // --- Dynamic context prompt (replaces buildSystemPrompt + buildFullPrompt) ---
 
-function buildContextPrompt(type, user, context) {
+function buildContextPrompt(type, user, context, channel = 'in_app') {
   const timeZone = user.preferences?.timezone || 'America/New_York';
   let prompt = `USER CONTEXT:
 - Name: ${user.name}
@@ -318,6 +318,10 @@ You're the user's productivity assistant. Help them with whatever they need:
 - Help with time management
 
 Keep responses concise. When the user asks you to create or modify tasks, describe what you'd change and confirm before proceeding.`;
+  }
+
+  if (channel === 'sms') {
+    prompt += '\n\nThis conversation is over SMS. Keep responses very concise (under 160 chars when possible). No markdown formatting. Be brief but helpful.';
   }
 
   return prompt;
@@ -480,7 +484,7 @@ async function executeAction(action, user) {
 
 // --- Chat flow ---
 
-async function chat(user, message, conversationId = null, type = 'ad_hoc') {
+async function chat(user, message, conversationId = null, type = 'ad_hoc', channel = 'in_app') {
   let conversation;
   if (conversationId) {
     conversation = await Conversation.findOne({ _id: conversationId, userId: user._id });
@@ -489,7 +493,7 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
     conversation = await Conversation.create({
       userId: user._id,
       type,
-      channel: 'in_app',
+      channel,
       context: { date: new Date() },
       messages: [],
     });
@@ -518,7 +522,7 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   }
 
   const context = await buildUserContext(user);
-  const contextPrompt = buildContextPrompt(conversation.type, user, context);
+  const contextPrompt = buildContextPrompt(conversation.type, user, context, conversation.channel);
 
   // Debug: log the date/time the AI will see
   const tz = user.preferences?.timezone || 'America/New_York';
@@ -552,14 +556,14 @@ async function chat(user, message, conversationId = null, type = 'ad_hoc') {
   };
 }
 
-async function generateMorningCheckIn(user) {
+async function generateMorningCheckIn(user, channel = 'in_app') {
   const context = await buildUserContext(user);
 
   if (context.tasks.length === 0 && context.calendarEvents.length === 0) {
     return null;
   }
 
-  return await chat(user, 'Good morning! What does my day look like?', null, 'morning_checkin');
+  return await chat(user, 'Good morning! What does my day look like?', null, 'morning_checkin', channel);
 }
 
 async function estimateDuration(user, taskId) {

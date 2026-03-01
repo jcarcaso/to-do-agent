@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const User = require('../models/User');
 const aiService = require('../services/ai');
+const smsService = require('../services/sms');
 const logger = require('../config/logger');
 
 // Store references to notify connected clients
@@ -24,10 +25,24 @@ function unregisterUserSocket(userId) {
  */
 async function runCheckInForUser(user) {
   try {
-    const result = await aiService.generateMorningCheckIn(user);
+    const smsEnabled = user.preferences?.notificationChannels?.sms &&
+      user.preferences?.phoneNumber &&
+      smsService.isConfigured();
+    const channel = smsEnabled ? 'sms' : 'in_app';
+
+    const result = await aiService.generateMorningCheckIn(user, channel);
     if (!result) {
       logger.info(`Skipping check-in for ${user.name}: no tasks or events`);
       return null;
+    }
+
+    // Send SMS if enabled
+    if (smsEnabled) {
+      try {
+        await smsService.sendSms(user.preferences.phoneNumber, result.message);
+      } catch (smsErr) {
+        logger.error(`SMS delivery failed for ${user.name}:`, smsErr.message);
+      }
     }
 
     // Notify via Socket.io if user is connected
@@ -39,7 +54,7 @@ async function runCheckInForUser(user) {
       });
     }
 
-    logger.info(`Morning check-in generated for ${user.name}`);
+    logger.info(`Morning check-in generated for ${user.name} (channel: ${channel})`);
     return result;
   } catch (err) {
     logger.error(`Morning check-in failed for ${user.name}:`, err.message);
@@ -51,10 +66,13 @@ async function runCheckInForUser(user) {
  * Process morning check-ins for all users based on their preferred time.
  */
 async function processCheckIns() {
-  // Find all users with in-app check-ins enabled
+  // Find all users with check-ins enabled (in-app or SMS)
   const users = await User.find({
     'preferences.morningCheckInTime': { $exists: true },
-    'preferences.notificationChannels.inApp': true,
+    $or: [
+      { 'preferences.notificationChannels.inApp': true },
+      { 'preferences.notificationChannels.sms': true },
+    ],
   });
 
   for (const user of users) {

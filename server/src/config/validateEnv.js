@@ -28,6 +28,16 @@ function validateEnv() {
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     logger.warn('CLAUDE_CODE_OAUTH_TOKEN is not set. AI features will not work.');
   }
+
+  // Twilio SMS configuration check
+  const twilioVars = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_PHONE_NUMBER'];
+  const setTwilioVars = twilioVars.filter(key => process.env[key]);
+  if (setTwilioVars.length > 0 && setTwilioVars.length < 3) {
+    const missing = twilioVars.filter(key => !process.env[key]);
+    logger.warn(`Incomplete Twilio config — missing: ${missing.join(', ')}. SMS features will not work.`);
+  } else if (setTwilioVars.length === 0) {
+    logger.warn('Twilio env vars not set. SMS features are disabled.');
+  }
 }
 
 module.exports = validateEnv;

@@ -51,6 +51,7 @@ app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/calendar', require('./routes/calendar'));
 app.use('/api/ai', aiLimiter, require('./routes/ai'));
 app.use('/api/user', require('./routes/user'));
+app.use('/api/webhooks', require('./routes/webhooks'));
 
 // Serve React static files in production
 const path = require('path');
