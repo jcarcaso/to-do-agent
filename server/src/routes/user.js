@@ -103,7 +103,7 @@ router.post('/verify-sms', async (req, res) => {
     await smsService.sendSms(phone, 'Hello, this is your personal To-Do Agent. Let me know if you need anything!');
     res.json({ success: true });
   } catch (err) {
-    logger.error(`Verify SMS failed for ${req.user.name}:`, err.message);
+    logger.error(`Verify SMS failed for ${req.user.name}: ${err.message}`);
     res.status(500).json({ error: 'Failed to send verification SMS' });
   }
 });
