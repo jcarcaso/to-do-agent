@@ -1,4 +1,4 @@
-name: Test & Deploy
+name: Test
 
 on:
   push:
@@ -41,34 +41,3 @@ jobs:
         run: |
           npm ci
           npm run build
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-            APP_DIR="/home/${{ secrets.EC2_USER }}/to-do-agent"
-
-            # First deploy: clone. Subsequent: pull.
-            if [ ! -d "$APP_DIR" ]; then
-              git clone https://github.com/jcarcaso/to-do-agent.git "$APP_DIR"
-            fi
-
-            # Write production .env
-            echo '${{ secrets.ENV_FILE }}' > "$APP_DIR/.env"
-
-            # Run deploy script
-            cd "$APP_DIR"
-            bash deploy.sh
