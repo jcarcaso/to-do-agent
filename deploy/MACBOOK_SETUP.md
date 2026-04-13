@@ -1,43 +1,79 @@
-# MacBook Pro Setup Guide
+# Ubuntu Server Setup Guide (MacBook Pro)
 
-Steps to migrate the To-Do Agent from EC2 to a MacBook Pro.
+Steps to migrate the To-Do Agent from EC2 to a MacBook Pro running Ubuntu Server.
 The app connects to MongoDB Atlas (cloud), so no database migration is needed.
+The app shells out to the `claude` CLI (Claude Code subscription) instead of using API tokens.
 
 ---
 
-## 1. Install Cloudflare Tunnel
-
-Gives you a stable HTTPS URL with no port forwarding. Free.
+## 1. Install Node.js via nvm
 
 ```bash
-brew install cloudflared
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+nvm install 20
+```
+
+## 2. Install Claude Code CLI
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Log in to activate your subscription:
+
+```bash
+claude
+# Follow the OAuth login flow in a browser
+```
+
+Verify it works:
+
+```bash
+claude -p "hello" --output-format json
+```
+
+## 3. Install Cloudflare Tunnel
+
+```bash
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+rm cloudflared.deb
+```
+
+Set up the tunnel:
+
+```bash
 cloudflared tunnel login
 cloudflared tunnel create todoagent
 cloudflared tunnel route dns todoagent <subdomain.yourdomain.com>
 ```
 
-Create the tunnel config:
+Create the config:
 
 ```bash
 mkdir -p ~/.cloudflared
-cat > ~/.cloudflared/config.yml << 'EOF'
+nano ~/.cloudflared/config.yml
+```
+
+```yaml
 tunnel: todoagent
-credentials-file: /Users/<YOU>/.cloudflared/<tunnel-id>.json
+credentials-file: /home/<YOU>/.cloudflared/<tunnel-id>.json
 
 ingress:
   - hostname: <subdomain.yourdomain.com>
     service: http://localhost:5000
   - service: http_status:404
-EOF
 ```
 
-Install as a system service so it survives reboots:
+Install as a systemd service:
 
 ```bash
 sudo cloudflared service install
+sudo systemctl enable cloudflared
 ```
 
-## 2. Clone repo and install dependencies
+## 4. Clone repo and install dependencies
 
 ```bash
 git clone git@github.com:jcarcaso/to-do-agent.git ~/to-do-agent
@@ -45,24 +81,25 @@ cd ~/to-do-agent/client && npm install && npm run build
 cd ~/to-do-agent/server && npm install
 ```
 
-## 3. Set up `.env`
+## 5. Set up `.env`
 
-Copy your production `.env` to the repo root and update two values:
-
-```bash
-cp /path/to/backup/.env ~/to-do-agent/.env
-```
-
-Edit `~/to-do-agent/.env` and change:
+Create `~/to-do-agent/.env` with your production values. Update two values:
 
 | Variable             | Old (EC2)                                | New (Tunnel)                                      |
 |----------------------|------------------------------------------|---------------------------------------------------|
 | `CLIENT_URL`         | `https://old-ec2-url.com`                | `https://<subdomain.yourdomain.com>`              |
 | `GOOGLE_CALLBACK_URL`| `https://old-ec2-url.com/api/auth/google/callback` | `https://<subdomain.yourdomain.com>/api/auth/google/callback` |
 
-All other vars (MongoDB Atlas, Twilio, Claude, JWT, etc.) stay the same.
+Also make sure these are set:
 
-## 4. Update external services
+| Variable               | Value |
+|------------------------|-------|
+| `CLAUDE_PATH`          | Path to claude binary (run `which claude` to find it) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Your OAuth token (check `~/.claude/` after logging in) |
+
+All other vars (MongoDB Atlas, Twilio, JWT, etc.) stay the same.
+
+## 6. Update external services
 
 ### Google Cloud Console
 1. Go to https://console.cloud.google.com → APIs & Services → Credentials
@@ -75,52 +112,62 @@ All other vars (MongoDB Atlas, Twilio, Claude, JWT, etc.) stay the same.
 2. Select your number
 3. Update the SMS webhook URL to `https://<subdomain.yourdomain.com>/api/webhooks/twilio`
 
-## 5. Create log directory and install the LaunchAgent
+## 7. Install the systemd service
 
 ```bash
-mkdir -p ~/Library/Logs/todoagent
+sudo cp ~/to-do-agent/deploy/todoagent.service /etc/systemd/system/todoagent.service
 ```
 
-Copy the plist template and edit paths:
+Edit the file and replace `YOUR_USER` with your actual username:
 
 ```bash
-cp ~/to-do-agent/deploy/launchagent.plist ~/Library/LaunchAgents/com.todoagent.server.plist
+sudo nano /etc/systemd/system/todoagent.service
 ```
 
-Edit `~/Library/LaunchAgents/com.todoagent.server.plist` and replace every `/Users/YOU/` with your actual home directory path (e.g. `/Users/jcarcaso/`).
-
-Load the agent:
+Enable and start:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.todoagent.server.plist
+sudo systemctl daemon-reload
+sudo systemctl enable todoagent
+sudo systemctl start todoagent
 ```
 
-## 6. Prevent MacBook from sleeping
+## 8. Prevent the MacBook from sleeping
 
-- **System Settings → Energy Saver** (or Battery → Power Adapter on newer macOS):
-  - Enable "Prevent automatic sleeping when the display is off"
-  - Enable "Start up automatically after a power failure"
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+```
 
-## 7. Verify everything works
+If the lid will be closed:
+
+```bash
+sudo nano /etc/systemd/logind.conf
+# Set: HandleLidSwitch=ignore
+# Set: HandleLidSwitchExternalPower=ignore
+sudo systemctl restart systemd-logind
+```
+
+## 9. Verify everything works
+
+```bash
+# Check the service is running
+sudo systemctl status todoagent
+
+# Check health endpoint
+curl -s http://localhost:5000/health
+```
 
 Run through this checklist:
 
-- [ ] `curl -s http://localhost:5000/health` returns OK
 - [ ] App is accessible at `https://<subdomain.yourdomain.com>`
 - [ ] Google OAuth login works
+- [ ] AI chat responds (confirms Claude CLI is working)
 - [ ] SMS verify button in settings sends a test message
 - [ ] Reply to that SMS and confirm inbound webhook works
 - [ ] Wait for or manually trigger the morning check-in cron
 - [ ] Reboot the MacBook and confirm the app comes back up automatically
 
-Check logs if anything goes wrong:
-
-```bash
-tail -f ~/Library/Logs/todoagent/stdout.log
-tail -f ~/Library/Logs/todoagent/stderr.log
-```
-
-## 8. Decommission from EC2
+## 10. Decommission from EC2
 
 Once everything is verified:
 
@@ -137,23 +184,26 @@ The EC2 instance continues hosting WordPress only.
 ## Useful commands
 
 ```bash
-# View LaunchAgent status
-launchctl list | grep todoagent
+# Service status
+sudo systemctl status todoagent
 
-# Stop the server
-launchctl unload ~/Library/LaunchAgents/com.todoagent.server.plist
+# Stop / start / restart
+sudo systemctl stop todoagent
+sudo systemctl start todoagent
+sudo systemctl restart todoagent
 
-# Start the server
-launchctl load ~/Library/LaunchAgents/com.todoagent.server.plist
+# View logs (live)
+journalctl -u todoagent -f
 
-# Restart (stop then start)
-launchctl unload ~/Library/LaunchAgents/com.todoagent.server.plist
-launchctl load ~/Library/LaunchAgents/com.todoagent.server.plist
+# View recent logs
+journalctl -u todoagent --since "1 hour ago"
 
-# View Cloudflare Tunnel status
-sudo cloudflared service status
+# Cloudflare Tunnel status
+sudo systemctl status cloudflared
 
-# View server logs
-tail -f ~/Library/Logs/todoagent/stdout.log
-tail -f ~/Library/Logs/todoagent/stderr.log
+# Update the app (pull + restart)
+cd ~/to-do-agent && git pull
+cd client && npm install && npm run build
+cd ../server && npm install
+sudo systemctl restart todoagent
 ```

@@ -1,0 +1,20 @@
+[Unit]
+Description=To-Do Agent Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/to-do-agent
+ExecStart=/bin/bash /home/YOUR_USER/to-do-agent/server/start.sh
+Restart=always
+RestartSec=10
+
+# Logging goes to journald (view with: journalctl -u todoagent)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=todoagent
+
+[Install]
+WantedBy=multi-user.target
